@@ -4,7 +4,7 @@ import pytest
 from cobra import Model
 from cobra.flux_analysis import find_blocked_reactions
 
-from spectra_cobrapy import (
+from spectra_cobra import (
     SpectraError,
     blocked_reaction_ids,
     consistent_reaction_ids,

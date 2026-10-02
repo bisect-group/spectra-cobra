@@ -31,7 +31,7 @@ install is covered.
 
 ```python
 from cobra.io import load_model
-from spectra_cobrapy import spectra_cc, spectra_me
+from spectra_cobra import spectra_cc, spectra_me
 
 model = load_model("textbook")
 
@@ -47,7 +47,7 @@ If the universal model is not already flux consistent, skip step 1 and let
 rather than failing:
 
 ```python
-from spectra_cobrapy import spectra_ccme
+from spectra_cobra import spectra_ccme
 
 extracted, blocked_core = spectra_ccme(model, core_reactions=["PGI", "PFK"], tol=1e-3)
 if blocked_core:
@@ -101,7 +101,9 @@ models = spectra_me(
 `"coreDirection"` varies which direction the core reactions run in, so the
 alternatives may coincide. `"pathwayExclusion"` adds a constraint ruling out
 each reaction set already returned, so every model is genuinely distinct, but
-it only works with `"minNetMILP"` or `"tradeOff"`.
+it only works with `"minNetMILP"` or `"tradeOff"`. If the network runs out of
+alternatives before `n_solutions` is reached, you get the ones that exist
+rather than an error, so check `len()` on the result.
 
 ## Steady state or accumulation
 
@@ -167,7 +169,72 @@ The formulations are ported as-is; the mechanics around them are not.
 
 ## Validation
 
-The test suite is 48 tests run against each available solver. Beyond that,
+### Parity with the MATLAB implementation
+
+[`tests/test_matlab_parity.py`](tests/test_matlab_parity.py) rebuilds the toy
+models and experiments from the MATLAB repository and checks this port lands on
+the same answers. Expected values are derived from each model's own
+stoichiometry rather than copied from a MATLAB run, so they are checked rather
+than assumed.
+
+**`SPECTRA_CC_topology_vs_stoichiometry.m`** — consistent reactions found:
+
+| model | stoichiometry | topology |
+|---|---|---|
+| `topology_toy_model(n=1)` | 0 of 6 | 6 of 6 |
+| `topology_toy_model(n=2)` | 6 of 6 | 6 of 6 |
+| `topology_toy_model(n=3)` | 0 of 6 | 6 of 6 |
+| `get_cc_toy_model_1` | 7 of 8 (`r3` blocked) | 8 of 8 |
+| `get_cc_toy_model_2` | 7 of 8 (`r3` blocked) | 7 of 8 (`r3` blocked) |
+
+The `topology_toy_model` rows are the result the topology mode exists for: at
+steady state the mass balances force `v2 · (n − 2) = 0`, so only `n = 2`
+carries any flux at all, while the accumulation condition admits every `n`.
+The two `get_cc_toy_model` rows are the instructive contrast — model 1's `C` is
+produced and never consumed, which accumulation rescues; model 2's `C` is
+consumed and never produced, which it cannot, since `S·v ≥ 0` lets a
+metabolite pile up but not appear from nothing.
+
+**`SPECTRA_ME__topology_vs_stoichiometry.m`** — extraction with the T1 export
+as the sole core reaction reproduces the same split: under stoichiometry the
+core is blocked and reported for `n = 1` and `n = 3`, while topology recovers
+the full six-reaction network for every `n`.
+
+**`Objective_diff_toy_models.m`** — all five formulations on
+`three_pathway_toy_model`, with that script's own weights:
+
+| `problem_type` | result | reactions |
+|---|---|---|
+| `minNetLP` | `r1 r2 r3 r4 r5` | 5 |
+| `minNetMILP` | `r5` + a three-reaction route | 4 |
+| `minNetDC` | `r1 r2 r3 r4 r5` | 5 |
+| `tradeOff` | `r5 r6 r7 r8` | 4 |
+| `growthOptim` | everything | 11 |
+
+This model separates the formulations by construction: `r1`–`r4` yields one
+`d` per unit of flux over four reactions, while the two shorter routes yield
+half a `d` each over three. So the fewest-reaction route is not the
+least-flux route, and `minNetLP` (5 reactions) genuinely diverges from
+`minNetMILP` (4). `tradeOff` picks `r6`–`r8` because that is the only route
+whose published weights sum positive (+2, against −1 each for the others).
+
+Pathway exclusion asked for five solutions returns **exactly the three routes
+the network has**, with no duplicates, then stops — matching the `if stat~=1
+break` in MATLAB's `spectraME`.
+
+**One known divergence.** `minNetDC` returns the L1 route (5 reactions) rather
+than the smallest one (4). Difference-of-convex is a local method, and started
+from the L1 solution it sits at a fixed point: the reweighting penalises the
+zero-flux reactions most and the already-active ones least. The result is
+stable across every step-sharpness schedule tried, so it is the scheme's local
+optimum, not a tuning artefact. Since `minNetDC` is a re-implementation rather
+than a port (see below), this is the one result worth comparing against a
+MATLAB run of `optimizeCardinality`. Use `minNetMILP` when the smallest
+network is what matters.
+
+### Other checks
+
+The test suite is 63 tests run against each available solver. Beyond that,
 the port has been checked end-to-end on the models bundled with cobrapy,
 with glpk and Gurobi agreeing on every result:
 

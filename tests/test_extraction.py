@@ -5,7 +5,7 @@ from typing import List
 import pytest
 from cobra import Model
 
-from spectra_cobrapy import (
+from spectra_cobra import (
     GROWTH_OPTIM,
     MIN_NET_DC,
     MIN_NET_LP,

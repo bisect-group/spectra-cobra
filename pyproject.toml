@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "spectra-cobrapy"
+name = "spectra-cobra"
 version = "0.1.0.dev0"
 description = "SPECTRA: scalable metabolic network reconstruction for cobrapy."
 readme = "README.md"
@@ -57,7 +57,7 @@ target-version = ["py39"]
 profile = "black"
 line_length = 88
 lines_after_imports = 2
-known_first_party = ["spectra_cobrapy"]
+known_first_party = ["spectra_cobra"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

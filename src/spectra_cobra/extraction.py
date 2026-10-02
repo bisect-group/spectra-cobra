@@ -24,7 +24,7 @@ from ._orientation import (
     relaxed_mass_balance,
     validate_consistency_type,
 )
-from .exceptions import SpectraError
+from .exceptions import SpectraError, SpectraSolverError
 from .formulations import (
     growth_optim,
     min_net_dc,
@@ -582,16 +582,34 @@ def _spectra_me(
                 )
             directions = _directions_from_flux(model, fluxes or {}, core_ids, signs)
 
-        keep_ids = _solve_formulation(
-            model,
-            directions,
-            all_weights,
-            tol,
-            steady_state,
-            problem_type,
-            time_limit,
-            exclude or None,
-        )
+        try:
+            keep_ids = _solve_formulation(
+                model,
+                directions,
+                all_weights,
+                tol,
+                steady_state,
+                problem_type,
+                time_limit,
+                exclude or None,
+            )
+        except SpectraSolverError:
+            # Excluding every solution found so far can leave the problem with
+            # no feasible answer, which simply means the network has no further
+            # alternative to offer. MATLAB's spectraME breaks out of its
+            # pathwayExclusion loop on a bad status for the same reason; the
+            # solutions already found still stand. A failure on the very first
+            # solve is a real error, so it is left to propagate.
+            if index > 0 and alt_solution_method == PATHWAY_EXCLUSION:
+                logger.info(
+                    "No further alternative solution exists; returning the %d "
+                    "found rather than the %d requested.",
+                    index,
+                    n_solutions,
+                )
+                break
+            raise
+
         models.append(_extract(model, keep_ids, remove_genes))
         found.append(keep_ids)
 

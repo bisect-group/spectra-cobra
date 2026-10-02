@@ -3,7 +3,7 @@
 import pytest
 from cobra import Model
 
-from spectra_cobrapy import (
+from spectra_cobra import (
     SpectraError,
     flux_reducer,
     min_net_dc,
@@ -11,7 +11,7 @@ from spectra_cobrapy import (
     min_net_milp,
     trade_off,
 )
-from spectra_cobrapy._orientation import reaction_signs
+from spectra_cobra._orientation import reaction_signs
 
 
 def _all_free(model: Model) -> dict:
