@@ -48,7 +48,6 @@ Verification
    :no-index:
 .. autoclass:: spectra_cobra.ExtractionReport
    :no-index:
-   :no-members:
 
 Exceptions
 ----------

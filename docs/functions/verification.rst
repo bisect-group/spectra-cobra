@@ -26,17 +26,18 @@ Why this exists
 The first promise always holds; the second does not.
 
 ``minNetLP`` and ``growthOptim`` read their answer off a flux vector, keeping
-any reaction whose flux clears a cutoff near the solver tolerance. An L1
-objective has many optimal solutions and spreads tiny fluxes across thousands
-of reactions, so discarding everything below that cutoff throws away flux that
-was balancing a hub metabolite. The kept flux vector is then only
-*approximately* mass balanced, and a reaction whose own flux was near ``tol``
-can turn out unable to carry it — **a core reaction included**.
+any reaction whose flux clears a cutoff near the solver tolerance. A few
+reactions end up carrying flux *just under* that cutoff while doing
+load-bearing balancing work, and dropping them leaves a mass-balance residual
+of the same order — above the solver's feasibility tolerance. The kept flux
+vector is then not actually feasible in the extracted model, and the chains
+that relied on those sub-cutoff reactions can carry no flux at all — **a core
+reaction included**.
 
-On Recon3D this is not hypothetical: see :doc:`../tutorials/recon3d` for
-measured numbers. The mixed-integer formulations do not have the problem,
-because a binary at one forces its reaction to carry at least ``tol`` and a
-binary at zero forces exactly zero.
+On Recon3D this is measured, not hypothetical: see
+:doc:`../tutorials/recon3d`. The mixed-integer formulations should not have
+the problem, since a binary at zero forces its reaction's flux to exactly zero
+and so discards nothing.
 
 The damaging case is a *blocked core reaction*. It is present in the model, so
 its presence alone suggests the extraction worked, but it cannot carry flux

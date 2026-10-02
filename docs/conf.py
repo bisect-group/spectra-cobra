@@ -45,8 +45,9 @@ napoleon_use_rtype = True
 
 autodoc_member_order = "bysource"
 autodoc_typehints = "description"
+# Members are declared per directive, not globally: the flat API index needs
+# to suppress them so the dedicated pages own the anchors.
 autodoc_default_options = {
-    "members": True,
     "show-inheritance": True,
 }
 # cobra is heavy and not needed to render signatures on a docs builder.

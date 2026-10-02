@@ -6,16 +6,17 @@ does **not** always hold for the LP formulations, because of how they decide
 which reactions to keep.
 
 ``minNetLP`` and ``growthOptim`` read their answer off a flux vector, keeping
-any reaction whose flux clears a cutoff near the solver's own tolerance. An L1
-objective has many optimal solutions and spreads tiny fluxes over thousands of
-reactions, so discarding everything below that cutoff throws away flux that
-was balancing a hub metabolite. The kept flux vector is then only
-approximately mass balanced, and a reaction whose own flux was near ``tol``
-can turn out unable to carry it — a core reaction included.
+any reaction whose flux clears a cutoff near the solver's own tolerance. A few
+reactions end up carrying flux just under that cutoff while doing load-bearing
+balancing work, and dropping them leaves a mass-balance residual of the same
+order. That residual is above the solver's feasibility tolerance, so the kept
+flux vector is not actually feasible in the extracted model, and the chains
+that relied on those sub-cutoff reactions can then carry no flux at all -- a
+core reaction included. On Recon3D this is measurable rather than theoretical;
+see the package documentation.
 
-The mixed-integer formulations do not have this problem: a binary at one
-forces its reaction to carry at least ``tol`` and a binary at zero forces
-exactly zero, so the kept flux vector is exactly balanced.
+The mixed-integer formulations should not have this problem, since a binary at
+zero forces its reaction's flux to exactly zero and so discards nothing.
 
 :func:`check_extraction` reports on a result so the difference is visible
 rather than silent.
@@ -51,11 +52,11 @@ class ExtractionReport:
         reaction is present, so a glance at the model suggests the extraction
         worked, but it cannot carry flux and so cannot play the role it was
         chosen for.
-    is_consistent : bool
-        Whether the extracted model is flux consistent.
-    is_valid : bool
-        Whether the extracted model delivers both promises, i.e. no missing
-        core reactions and nothing blocked.
+
+    See Also
+    --------
+    is_valid : Whether both promises were kept.
+    is_consistent : Whether nothing in the model is blocked.
 
     """
 

@@ -244,13 +244,16 @@ consistent model** — in most trials a few reactions in the result, *including
 some core reactions*, cannot carry flux in it.
 
 The cause is the inclusion rule inherited from MATLAB: keep a reaction if its
-flux in the extraction LP exceeds `tol * 1e-7`, which is below solver noise
-and so effectively "any nonzero flux". An L1 objective has many optimal
-solutions and spreads tiny fluxes over thousands of reactions, so discarding
-the ten thousand below that threshold throws away flux that was balancing a
-hub metabolite — on `h[c]`, which 2079 reactions touch, the discarded dust
-sums to more than `tol`. The kept flux vector is then only approximately mass
-balanced, and reactions whose own flux was near `tol` can no longer carry it.
+extraction-LP flux exceeds `tol * 1e-7`, floored here at `model.tolerance`, so
+around `1e-7`. A handful of reactions end up carrying flux *just under* that
+cutoff while doing load-bearing balancing work. Dropping them leaves a
+mass-balance residual of the same order — in the trial examined, up to
+`3.5e-07` on `coa[c]`, on 3 of 972 metabolites — which is above the solver's
+feasibility tolerance, so the kept flux vector is not actually feasible in the
+extracted model. For the chains that relied on those sub-cutoff reactions the
+only feasible flux is then exactly zero: all 25 sampled blocked reactions have
+an attainable flux of **0** in the extracted model, despite carrying ~`1e-4`
+in the LP. They are mostly exchange and transport pairs.
 
 A blocked *core* reaction is the damaging case: it is present, so the model
 looks right, but it cannot play the role it was chosen for. Use
@@ -263,10 +266,13 @@ report = check_extraction(extracted, core, tol=1e-4)
 assert report.is_valid, report.summary()
 ```
 
-`minNetMILP` is immune by construction — a binary at one forces its reaction
-to carry at least `tol`, a binary at zero forces exactly zero — at the cost of
-a genome-scale MILP. Pruning the blocked reactions afterwards also yields a
-consistent model, but it removed two to five core reactions in these trials.
+`minNetMILP` should not have this failure mode: a binary at zero forces its
+reaction's flux to *exactly* zero, so nothing sub-cutoff is discarded and the
+kept flux vector is exactly balanced. That is an argument from the
+formulation, not a measurement — the genome-scale MILP did not finish within
+15 minutes on Gurobi at this core size, so it is untested here and the cost is
+real. Pruning the blocked reactions afterwards does yield a consistent model,
+but it removed two to five core reactions in these trials.
 
 One of the twelve trials raised `SpectraError` because the direction phase's
 convex combination cancelled out on two core reactions; a different `seed`

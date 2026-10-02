@@ -103,16 +103,23 @@ solving it.
    independent FVA-based ``find_blocked_reactions`` agree exactly on every
    count, so it is not a detection artefact.
 
-   The cause is the inclusion rule, which comes from MATLAB:
-   a reaction is kept if its flux in the extraction LP exceeds
-   ``tol * 1e-7``, floored here at ``model.tolerance``, so around
-   ``1e-7``. An L1 objective has many optimal solutions and spreads tiny
-   fluxes across thousands of reactions, so dropping the ten thousand
-   reactions below that threshold discards flux that was doing real balancing
-   work. On a hub metabolite such as ``h[c]``, which 2079 reactions touch,
-   that discarded dust sums to more than ``tol`` — so the kept flux vector is
-   only approximately mass balanced, and the reactions whose flux was itself
-   near ``tol`` can no longer carry it.
+   The cause is the inclusion rule, which comes from MATLAB: a reaction is
+   kept if its flux in the extraction LP exceeds ``tol * 1e-7``, floored here
+   at ``model.tolerance``, so around ``1e-7``. A handful of reactions end up
+   carrying flux *just under* that cutoff while doing load-bearing balancing
+   work. Dropping them leaves a mass-balance residual of the same order — in
+   the trial examined, up to ``3.5e-07`` on ``coa[c]``, on 3 of 972
+   metabolites — which is above the solver's feasibility tolerance, so the
+   kept flux vector is not actually feasible in the extracted model. For the
+   chains that relied on those sub-cutoff reactions the only feasible flux is
+   then exactly zero: all 25 sampled blocked reactions had an attainable flux
+   of **0**, despite carrying around ``1e-4`` in the LP. They were mostly
+   exchange and transport pairs, such as ``EX_dxtrn[e]`` with ``DXTRNt``.
+
+   Note what this is *not*. The total flux discarded is tiny — 1.6e-06 across
+   all 10376 dropped reactions — so this is not an accumulation of noise. It
+   is a few specific reactions below the cutoff whose absence breaks a chain
+   outright.
 
    **Always check the result** rather than assuming it:
 
@@ -128,10 +135,12 @@ Getting a consistent model
 
 Two options, with different costs.
 
-**Use ``minNetMILP``.** Its binary formulation forces a kept reaction to carry
-at least ``tol`` and a dropped one to carry exactly zero, so the kept flux
-vector is exactly mass balanced and the question does not arise. The cost is
-a genome-scale MILP.
+**Use ``minNetMILP``.** A binary at zero forces its reaction's flux to
+*exactly* zero, so nothing sub-cutoff is discarded and the kept flux vector is
+exactly mass balanced. That is an argument from the formulation rather than a
+measurement: at a core size of 50 the genome-scale MILP did not finish within
+15 minutes on Gurobi, so it is untested at this scale, and the cost is real.
+Set ``time_limit`` and expect a feasible-but-not-proven-optimal answer.
 
 .. code-block:: python
 
