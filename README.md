@@ -222,9 +222,28 @@ break` in MATLAB's `spectraME`.
 
 ### Genome scale: Recon3D
 
-`spectra_cc` finds the consistent Recon3D from the MATLAB repository (11303
-reactions) **fully consistent in 8 LPs, ~15 s**, confirming the `cons` in its
-name.
+Note that the models shipped with the MATLAB work are *already* consistency
+checked — `UpdatedRecon3D.mat` and `consRecon3DGeneSymbol.mat` (11303
+reactions) and the PCOS study's `Reconmodel.mat` (10600) all have zero blocked
+reactions. Running the check on those confirms only that the files are what
+they claim. To see it do work, Recon3D was restricted to a defined medium,
+which is where context-specific modelling actually starts:
+
+| | reactions | blocked | LPs | time |
+|---|---|---|---|---|
+| Recon3D, defined medium | 11303 → **8406** | 2897 | 8 | 30 s |
+| iJO1366, as distributed | 2583 → **1705** | 878 | 12 | 5 s |
+
+Both derived models are **fixed points** — re-running the check with a
+different seed removes nothing — and cobrapy's independent FVA-based
+`find_blocked_reactions` reports zero blocked in each.
+
+Where `spectra_cc` and `fastcc` disagree on the defined-medium Recon3D (six
+reactions), FVA says `spectra_cc` is right on all six: `fastcc` produced three
+false positives and three false negatives. `fastcc` is also not reproducible
+at this scale — across five runs it returned 8403, 8405, 8406, 8408 and 8410
+on the same model, because its singleton phase draws an arbitrary element from
+a Python set, whereas seeded `spectra_cc` returned 8406 every time.
 
 Extraction was then checked with random core sets — twelve trials across four
 core sizes, verifying both promises: every core reaction present, and the

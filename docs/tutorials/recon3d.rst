@@ -9,25 +9,149 @@ default formulation falls short.
 The model used here is the consistent Recon3D from the MATLAB repository:
 11303 reactions over 6388 metabolites.
 
-Consistency at genome scale
----------------------------
+Getting a fully consistent model
+--------------------------------
+
+.. code-block:: python
+
+   from spectra_cobra import spectra_cc
+
+   model.solver = "gurobi"
+   consistent = spectra_cc(model, tol=1e-4, detection_cutoff=1e-7, seed=0)
+   print(f"{len(model.reactions)} -> {len(consistent.reactions)} reactions")
+
+On Recon3D restricted to a defined medium — which is where context-specific
+modelling actually starts, most exchanges closed — that gives:
+
+.. code-block:: text
+
+   11303 -> 8406 reactions
+
+2897 reactions removed, in 8 LPs and about 30 seconds.
+
+.. note::
+
+   The files in the MATLAB repository's ``Recon3D+/`` directory are *already*
+   consistency-checked: both ``UpdatedRecon3D.mat`` and
+   ``consRecon3DGeneSymbol.mat`` hold 11303 reactions with nothing blocked, as
+   does the ``Reconmodel.mat`` used in the PCOS study (10600 reactions, 0
+   blocked). Running the check on one of those tells you only that the file is
+   what it claims. Close the medium first, or start from an unchecked
+   reconstruction, if you want to see the check do work.
+
+Proving it is consistent
+------------------------
+
+A fully consistent model is a **fixed point**: running the check again must
+remove nothing. Use a different seed, so you are not just repeating the same
+randomised tie-breaking:
 
 .. code-block:: python
 
    from spectra_cobra import consistent_reaction_ids
 
-   model.solver = "gurobi"
-   ids, n_lps = consistent_reaction_ids(model, tol=1e-4, seed=0)
-   print(f"{len(ids)}/{len(model.reactions)} consistent in {n_lps} LPs")
+   again, n_lps = consistent_reaction_ids(consistent, tol=1e-4,
+                                          detection_cutoff=1e-7, seed=1)
+   assert len(again) == len(consistent.reactions), "not actually consistent"
 
 .. code-block:: text
 
-   11303/11303 consistent in 8 LPs
+   8406/8406 consistent in 8 LPs
 
-All of it, in eight LPs and about fifteen seconds. Two things to take from
-that. The model is genuinely flux consistent, which confirms the ``cons``
-in its name. And the LP count barely moves with model size — the textbook
-model also took eight.
+And confirm independently with cobrapy, which uses FVA rather than this
+algorithm:
+
+.. code-block:: python
+
+   from cobra.flux_analysis import find_blocked_reactions
+
+   assert find_blocked_reactions(consistent, zero_cutoff=1e-7) == []
+
+Both hold. The same cycle on iJO1366, which ships genuinely inconsistent,
+removes 878 of 2583 reactions and the remaining 1705 are a fixed point with
+zero blocked by FVA.
+
+Accuracy against fastcc
+-----------------------
+
+On the defined-medium Recon3D the two methods disagree on six reactions.
+Taking FVA on the full model as the arbiter:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 20 25 25
+
+   * - Reaction
+     - FVA \|v\|max
+     - Truly
+     - Which was right
+   * - ``EX_M00234[e]``
+     - 0
+     - blocked
+     - ``spectra_cc``
+   * - ``EX_M01807[e]``
+     - 0
+     - blocked
+     - ``spectra_cc``
+   * - ``HMR_0002``
+     - 0
+     - blocked
+     - ``spectra_cc``
+   * - ``HMR_3996``
+     - 1000
+     - consistent
+     - ``spectra_cc``
+   * - ``r1391``
+     - 1000
+     - consistent
+     - ``spectra_cc``
+   * - ``r1392``
+     - 1000
+     - consistent
+     - ``spectra_cc``
+
+``spectra_cc`` is right on all six; ``fastcc`` produced three false positives
+and three false negatives. On the PCOS ``Reconmodel.mat`` the pattern repeats
+on a smaller scale: ``spectra_cc`` and FVA agree that all 10600 reactions are
+consistent, while ``fastcc`` reports 3 of them blocked.
+
+Reproducibility at genome scale
+-------------------------------
+
+Part of that disagreement is that ``fastcc`` does not give the same answer
+twice. Its singleton phase picks an arbitrary element from a Python set, and
+set iteration order depends on ``PYTHONHASHSEED``, so the result shifts from
+run to run. ``spectra_cc`` given a ``seed`` does not:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 34 33 33
+
+   * - Run
+     - ``spectra_cc`` (``seed=0``)
+     - ``fastcc``
+   * - ``PYTHONHASHSEED=1``
+     - 8406
+     - 8408
+   * - ``PYTHONHASHSEED=2``
+     - 8406
+     - 8405
+   * - ``PYTHONHASHSEED=3``
+     - 8406
+     - 8403
+   * - two further runs
+     - 8406, 8406
+     - 8410, 8406
+
+Across five runs on the same model ``fastcc`` spans 8403 to 8410, a range of
+seven reactions, while ``spectra_cc`` returns 8406 every time.
+
+This is not a claim that ``spectra_cc`` is always more accurate — six
+reactions out of 11303 is a 0.05% disagreement, and both are far closer to
+each other than to being wrong. But it does mean the port is not merely
+reproducing ``fastcc``, that it is the reproducible of the two, and that at
+genome scale a consistency result is worth confirming with FVA whichever
+method produced it.
 
 Extraction with a random core set
 ---------------------------------
