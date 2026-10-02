@@ -6,7 +6,6 @@ from cobra import Model
 from spectra_cobra import (
     SpectraError,
     flux_reducer,
-    min_net_dc,
     min_net_lp,
     min_net_milp,
     trade_off,
@@ -76,14 +75,6 @@ def test_min_net_milp_matches_min_net_lp_here(toy_model: Model) -> None:
     assert min_net_lp(toy_model, directions, weights, 1e-4) == min_net_milp(
         toy_model, directions, weights, 1e-4
     )
-
-
-def test_min_net_dc_matches_the_others_here(toy_model: Model) -> None:
-    """The DC formulation finds the same pathway on this toy model."""
-    directions = _all_free(toy_model)
-    directions["R3"] = 1
-    kept = min_net_dc(toy_model, directions, _ones(toy_model), 1e-4)
-    assert kept == {"R1", "R2", "R3", "R4", "R5"}
 
 
 def test_min_net_milp_uses_binary_variables(toy_model: Model) -> None:

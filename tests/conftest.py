@@ -6,10 +6,15 @@ import pytest
 from cobra import Model, Reaction
 from cobra.util.solver import solvers
 
-#: Every solver cobrapy can see, so that each test runs on all of them.
-#: ``glpk_exact`` is left out: it is an exact-arithmetic LP solver with no
-#: mixed-integer support, which the extraction formulations need.
-AVAILABLE_SOLVERS = sorted(set(solvers) - {"glpk_exact"})
+#: Solvers that cannot run the whole suite, so are left out of the matrix.
+#: ``glpk_exact`` is an exact-arithmetic LP solver and ``scipy`` a thin LP
+#: wrapper; neither supports the mixed-integer problems the extraction
+#: formulations need.
+UNSUPPORTED_SOLVERS = {"glpk_exact", "scipy"}
+
+#: Every solver cobrapy can see that can run the suite, so that each test runs
+#: on all of them.
+AVAILABLE_SOLVERS = sorted(set(solvers) - UNSUPPORTED_SOLVERS)
 
 
 @pytest.fixture(params=AVAILABLE_SOLVERS, scope="session")

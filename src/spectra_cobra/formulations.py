@@ -9,7 +9,6 @@ Formulation         Objective                                   Weights
 ==================  ==========================================  ==============
 ``min_net_lp``      minimise weighted total absolute flux       non-negative
 ``min_net_milp``    minimise weighted reaction count            non-negative
-``min_net_dc``      minimise weighted reaction count            non-negative
 ``trade_off``       maximise weighted included reaction count   any real
 ``growth_optim``    maximise biomass minus weighted flux        non-negative
 ==================  ==========================================  ==============
@@ -24,7 +23,6 @@ import math
 from logging import getLogger
 from typing import TYPE_CHECKING, Dict, List, Optional, Set
 
-import numpy as np
 from cobra.util.solver import linear_reaction_coefficients
 from optlang.interface import FEASIBLE, OPTIMAL
 from optlang.symbolics import Zero, add
@@ -413,119 +411,6 @@ def min_net_milp(
         model.slim_optimize()
         _check_status(model, "minNetMILP problem", milp=True)
         return _included_from_indicators(directions, indicators)
-
-
-def min_net_dc(
-    model: "Model",
-    directions: Dict[str, int],
-    weights: Dict[str, float],
-    tol: float,
-    steady_state: bool = True,
-    max_iterations: int = 100,
-    theta: float = 0.5,
-    theta_multiplier: float = 2.0,
-    max_theta: float = 1.0e4,
-    convergence_tol: float = 1e-8,
-) -> Set[str]:
-    """Extract a model by approximately minimising the reaction count.
-
-    Parameters
-    ----------
-    model : cobra.Model
-        The model to extract from.
-    directions : dict of {str: int}
-        The oriented direction each reaction must carry flux in.
-    weights : dict of {str: float}
-        The weight of each reaction. Higher weights make a reaction less
-        likely to be kept; they should be non-negative.
-    tol : float
-        The minimum absolute flux a directed reaction has to carry.
-    steady_state : bool, optional
-        Whether to enforce ``S v = 0`` rather than ``S v >= 0`` (default True).
-    max_iterations : int, optional
-        The most LPs to solve before giving up on convergence (default 100).
-    theta : float, optional
-        The initial sharpness of the step approximation (default 0.5).
-    theta_multiplier : float, optional
-        The factor `theta` grows by each iteration (default 2.0).
-    max_theta : float, optional
-        The largest `theta` to use (default 1e4).
-    convergence_tol : float, optional
-        The largest change in the weighted objective that still counts as
-        converged (default 1e-8).
-
-    Returns
-    -------
-    set of str
-        The identifiers of the reactions in the extracted model.
-
-    Notes
-    -----
-    This is the ``minNetDC`` branch of ``minNet.m``, which delegates to the
-    COBRA Toolbox's ``optimizeCardinality``. cobrapy has no equivalent, so
-    this is a **re-implementation rather than a port**: it minimises
-    :math:`\\sum_i w_i \\|v_i\\|_0` by the standard difference-of-convex
-    scheme, approximating the step function with
-    :math:`1 - e^{-\\theta |v_i|}`, linearising it at the current point, and
-    solving the resulting weighted L1 problem repeatedly while increasing
-    :math:`\\theta`. Each iteration is one LP.
-
-    Because the algorithm differs in its details from
-    ``optimizeCardinality``, results may differ from MATLAB's, though both
-    target the same objective. :func:`min_net_milp` solves that objective
-    exactly if you can afford it.
-
-    """
-    free_ids = _free_reaction_ids(model, directions)
-    signs = reaction_signs(model)
-    free_weights = np.array([float(weights[r]) for r in free_ids])
-
-    with model, relaxed_mass_balance(model, steady_state):
-        apply_direction_bounds(model, directions, signs, tol)
-        abs_vars = _add_absolute_value_vars(model, free_ids)
-
-        model.objective = model.problem.Objective(Zero, direction="min")
-        # Iteration 0 is a plain weighted L1 minimisation, the same problem
-        # min_net_lp solves; the reweighting starts from its solution.
-        coefficients = free_weights.copy()
-        previous_objective = None
-        current_theta = theta
-
-        for iteration in range(max_iterations):
-            model.objective.set_linear_coefficients(
-                {abs_vars[r]: float(c) for r, c in zip(free_ids, coefficients)}
-            )
-            model.slim_optimize()
-            _check_status(model, f"minNetDC problem (iteration {iteration})")
-
-            abs_flux = np.array(
-                [abs(model.reactions.get_by_id(r).flux) for r in free_ids]
-            )
-            # The quantity actually being minimised, for the stopping test.
-            objective = float(
-                np.sum(free_weights * (1.0 - np.exp(-current_theta * abs_flux)))
-            )
-            if (
-                previous_objective is not None
-                and abs(previous_objective - objective) <= convergence_tol
-            ):
-                logger.debug("minNetDC converged after %d iterations.", iteration + 1)
-                break
-            previous_objective = objective
-
-            # Gradient of the concave approximation at the current point.
-            coefficients = (
-                free_weights * current_theta * np.exp(-current_theta * abs_flux)
-            )
-            current_theta = min(current_theta * theta_multiplier, max_theta)
-        else:
-            logger.warning(
-                "minNetDC did not converge within %d iterations; returning the "
-                "last solution.",
-                max_iterations,
-            )
-
-        return _included_reactions(model, tol)
 
 
 def trade_off(

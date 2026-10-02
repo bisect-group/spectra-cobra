@@ -34,7 +34,6 @@ from .exceptions import (
 from .extraction import (
     CORE_DIRECTION,
     GROWTH_OPTIM,
-    MIN_NET_DC,
     MIN_NET_LP,
     MIN_NET_MILP,
     PATHWAY_EXCLUSION,
@@ -44,13 +43,8 @@ from .extraction import (
     spectra_me,
 )
 from .flux_reducer import flux_reducer
-from .formulations import (
-    growth_optim,
-    min_net_dc,
-    min_net_lp,
-    min_net_milp,
-    trade_off,
-)
+from .formulations import growth_optim, min_net_lp, min_net_milp, trade_off
+from .verification import ExtractionReport, check_extraction
 
 __version__ = "0.1.0.dev0"
 
@@ -65,16 +59,17 @@ __all__ = (
     # Formulations, for use on their own.
     "min_net_lp",
     "min_net_milp",
-    "min_net_dc",
     "trade_off",
     "growth_optim",
     "flux_reducer",
+    # Verification.
+    "check_extraction",
+    "ExtractionReport",
     # Option names.
     "STOICHIOMETRY",
     "TOPOLOGY",
     "MIN_NET_LP",
     "MIN_NET_MILP",
-    "MIN_NET_DC",
     "TRADE_OFF",
     "GROWTH_OPTIM",
     "PROBLEM_TYPES",

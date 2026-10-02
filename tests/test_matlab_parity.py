@@ -11,8 +11,9 @@ assert that this port lands on the same answers. Three scripts are covered:
     ``spectraCCME`` on the same ``topology_toy_model(n)``, with the T1 export
     as the single core reaction.
 ``Objective_diff_toy_models.m``
-    all five network inference formulations on ``three_pathway_toy_model``,
-    with the weights that script uses, plus pathway exclusion.
+    the network inference formulations on ``three_pathway_toy_model``, with
+    the weights that script uses, plus pathway exclusion. That script also
+    exercises ``minNetDC``, which this package does not provide.
 
 The expected values are derived from the models' own structure rather than
 copied from a MATLAB run, so each one is checked against what the
@@ -26,7 +27,6 @@ import pytest
 from cobra import Model, Reaction
 
 from spectra_cobra import consistent_reaction_ids, spectra_ccme, spectra_me
-from spectra_cobra.formulations import min_net_dc, min_net_lp, min_net_milp
 
 #: ``tol`` as the two consistency scripts set it.
 CC_TOL = 1e-4
@@ -431,32 +431,6 @@ def test_me_growth_optim_uses_every_route(solver: str) -> None:
         seed=0,
     )
     assert _ids(extracted) == set(UNIT_WEIGHTS)
-
-
-def test_me_min_net_dc_settles_on_the_l1_solution(solver: str) -> None:
-    """minNetDC returns the L1 route on this model, not the smallest one.
-
-    This is the one place the port is known to be able to disagree with
-    MATLAB. ``minNetDC`` is a re-implementation of the difference-of-convex
-    scheme rather than a port of the COBRA Toolbox's ``optimizeCardinality``,
-    and difference-of-convex is a local method: started from the L1 solution
-    it sits at a fixed point, because the reweighting penalises the
-    zero-flux reactions most and the already-active ones least. The result is
-    stable across every step-sharpness schedule tried, so it is the scheme's
-    local optimum rather than a tuning artefact.
-
-    :func:`min_net_milp` solves the same objective exactly when the smallest
-    network is what matters.
-    """
-    model = three_pathway_toy_model(solver)
-    directions = dict({f"r{index}": 0 for index in range(1, 12)}, r5=1)
-
-    from_dc = min_net_dc(model, directions, UNIT_WEIGHTS, ME_TOL)
-    from_lp = min_net_lp(model, directions, UNIT_WEIGHTS, ME_TOL)
-    from_milp = min_net_milp(model, directions, UNIT_WEIGHTS, ME_TOL)
-
-    assert from_dc == from_lp == LEAST_FLUX_ROUTE
-    assert len(from_milp) < len(from_dc)
 
 
 @pytest.mark.parametrize(

@@ -7,7 +7,6 @@ from cobra import Model
 
 from spectra_cobra import (
     GROWTH_OPTIM,
-    MIN_NET_DC,
     MIN_NET_LP,
     MIN_NET_MILP,
     PATHWAY_EXCLUSION,
@@ -18,10 +17,8 @@ from spectra_cobra import (
     spectra_me,
 )
 
-#: The formulations that only need an LP, so are cheap to test exhaustively.
-LP_PROBLEM_TYPES = (MIN_NET_LP, MIN_NET_DC)
 #: Every formulation that takes non-negative weights, i.e. all but tradeOff.
-COST_PROBLEM_TYPES = LP_PROBLEM_TYPES + (MIN_NET_MILP,)
+COST_PROBLEM_TYPES = (MIN_NET_LP, MIN_NET_MILP)
 
 
 def _ids(model: Model) -> set:

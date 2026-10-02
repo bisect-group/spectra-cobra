@@ -63,16 +63,19 @@ depends on the choice, so the two columns go together:
 |-----------------|------------------------------------------|---------------|--------|
 | `"minNetLP"`    | minimise weighted total absolute flux    | non-negative  | 1 LP   |
 | `"minNetMILP"`  | minimise weighted reaction count         | non-negative  | 1 MILP |
-| `"minNetDC"`    | minimise weighted reaction count         | non-negative  | n LPs  |
 | `"tradeOff"`    | maximise weighted count of kept reactions| **any real**  | 1 MILP |
 | `"growthOptim"` | maximise biomass minus weighted flux     | non-negative  | 1 LP   |
 
-The three `minNet` variants target the same thing by different routes.
+The two `minNet` variants target the same thing by different routes.
 `minNetLP` is the L1 relaxation and is by far the cheapest, but it favours
 many small fluxes over few large ones, so it tends to keep more reactions
 than necessary. `minNetMILP` minimises the count exactly. On the textbook
 model the difference is visible: `minNetLP` keeps 27 reactions where
 `minNetMILP` keeps 16.
+
+MATLAB's `minNetDC`, a third route to the same objective, is not provided.
+It delegates to the COBRA Toolbox's `optimizeCardinality`, which cobrapy has
+no equivalent of; `minNetMILP` solves that objective exactly instead.
 
 `tradeOff` is the one to use when your omics data gives both positive and
 negative evidence, since a positive weight pushes a reaction in and a
@@ -157,13 +160,9 @@ The formulations are ported as-is; the mechanics around them are not.
   to its `growthOptim` and `tradeOff` branches where the variable is
   `steadystate`, so in MATLAB those two problem types raise an
   undefined-variable error rather than running. Both work here.
-- **`minNetDC` is a re-implementation, not a port.** MATLAB delegates to the
-  COBRA Toolbox's `optimizeCardinality`, which cobrapy has no equivalent of.
-  This version minimises the same objective by the standard
-  difference-of-convex scheme — approximating the step function with
-  `1 - exp(-θ|v|)`, linearising it at the current point, and re-solving while
-  increasing `θ`. It targets the same thing but the numbers may differ from
-  MATLAB's. Use `minNetMILP` when you need the objective solved exactly.
+- **`minNetDC` is not ported.** MATLAB delegates it to the COBRA Toolbox's
+  `optimizeCardinality`, which cobrapy has no equivalent of.
+  `minNetMILP` targets the same objective and solves it exactly.
 - **`spectraME2` is not ported.** It is an older LP-only subset of
   `spectraME`, which covers everything it does.
 
@@ -200,14 +199,13 @@ as the sole core reaction reproduces the same split: under stoichiometry the
 core is blocked and reported for `n = 1` and `n = 3`, while topology recovers
 the full six-reaction network for every `n`.
 
-**`Objective_diff_toy_models.m`** — all five formulations on
+**`Objective_diff_toy_models.m`** — the formulations on
 `three_pathway_toy_model`, with that script's own weights:
 
 | `problem_type` | result | reactions |
 |---|---|---|
 | `minNetLP` | `r1 r2 r3 r4 r5` | 5 |
 | `minNetMILP` | `r5` + a three-reaction route | 4 |
-| `minNetDC` | `r1 r2 r3 r4 r5` | 5 |
 | `tradeOff` | `r5 r6 r7 r8` | 4 |
 | `growthOptim` | everything | 11 |
 
@@ -222,15 +220,57 @@ Pathway exclusion asked for five solutions returns **exactly the three routes
 the network has**, with no duplicates, then stops — matching the `if stat~=1
 break` in MATLAB's `spectraME`.
 
-**One known divergence.** `minNetDC` returns the L1 route (5 reactions) rather
-than the smallest one (4). Difference-of-convex is a local method, and started
-from the L1 solution it sits at a fixed point: the reweighting penalises the
-zero-flux reactions most and the already-active ones least. The result is
-stable across every step-sharpness schedule tried, so it is the scheme's local
-optimum, not a tuning artefact. Since `minNetDC` is a re-implementation rather
-than a port (see below), this is the one result worth comparing against a
-MATLAB run of `optimizeCardinality`. Use `minNetMILP` when the smallest
-network is what matters.
+### Genome scale: Recon3D
+
+`spectra_cc` finds the consistent Recon3D from the MATLAB repository (11303
+reactions) **fully consistent in 8 LPs, ~15 s**, confirming the `cons` in its
+name.
+
+Extraction was then checked with random core sets — twelve trials across four
+core sizes, verifying both promises: every core reaction present, and the
+result flux consistent. Consistency was checked twice, with this package's
+own check and with cobrapy's independent FVA-based `find_blocked_reactions`,
+which agreed on every count.
+
+| core | trials | extracted | core present | blocked | of which core |
+|---|---|---|---|---|---|
+| 10 | 3 | 167–177 | all | 0, 0, 0 | — |
+| 50 | 3 | 525–927 | all | 0, 0, **112** | 4 |
+| 200 | 3 | 1495–1791 | all (1 failed) | **37**, **19** | 2, 2 |
+| 500 | 3 | 2752–2792 | all | **15**, **16**, 0 | 5, 3 |
+
+**Core reactions are always present. But `minNetLP` does not guarantee a flux
+consistent model** — in most trials a few reactions in the result, *including
+some core reactions*, cannot carry flux in it.
+
+The cause is the inclusion rule inherited from MATLAB: keep a reaction if its
+flux in the extraction LP exceeds `tol * 1e-7`, which is below solver noise
+and so effectively "any nonzero flux". An L1 objective has many optimal
+solutions and spreads tiny fluxes over thousands of reactions, so discarding
+the ten thousand below that threshold throws away flux that was balancing a
+hub metabolite — on `h[c]`, which 2079 reactions touch, the discarded dust
+sums to more than `tol`. The kept flux vector is then only approximately mass
+balanced, and reactions whose own flux was near `tol` can no longer carry it.
+
+A blocked *core* reaction is the damaging case: it is present, so the model
+looks right, but it cannot play the role it was chosen for. Use
+`check_extraction` to catch it:
+
+```python
+from spectra_cobra import check_extraction
+
+report = check_extraction(extracted, core, tol=1e-4)
+assert report.is_valid, report.summary()
+```
+
+`minNetMILP` is immune by construction — a binary at one forces its reaction
+to carry at least `tol`, a binary at zero forces exactly zero — at the cost of
+a genome-scale MILP. Pruning the blocked reactions afterwards also yields a
+consistent model, but it removed two to five core reactions in these trials.
+
+One of the twelve trials raised `SpectraError` because the direction phase's
+convex combination cancelled out on two core reactions; a different `seed`
+fixes it.
 
 ### Other checks
 
@@ -242,20 +282,17 @@ with glpk and Gurobi agreeing on every result:
 |---|---|---|
 | `spectra_cc` | 87 consistent | 1705 consistent, 10 LPs, 4.9 s |
 | `minNetLP` | 27 rxns | 81 rxns, 2.4 s |
-| `minNetDC` | 27 rxns | 79 rxns, 2.6 s |
 | `minNetMILP` | 16 rxns | 61 rxns, 69 s |
 | `growthOptim` | 27 rxns | 83 rxns, 2.4 s |
 | `tradeOff` | 87 rxns | 1549 rxns, 3.4 s |
 
 Two things worth reading off that table. The consistency check agrees exactly
-with cobrapy's own `fastcc` and `find_blocked_reactions` on both models.
-And the three `minNet` variants land in the order theory predicts —
-`minNetMILP` (exact) below `minNetDC` (cardinality, approximated) below
-`minNetLP` (L1 relaxation) — which is the evidence that the DC
-re-implementation is doing real work rather than reducing to the L1 problem.
-`tradeOff` keeps nearly everything here only because the default weights are
-all +1, which rewards including every reaction; it is meant to be used with
-weights that carry both signs.
+with cobrapy's own `fastcc` and `find_blocked_reactions` on both models. And
+`minNetMILP` lands below `minNetLP` on both, as it should: the former
+minimises the reaction count exactly where the latter minimises its L1
+relaxation. `tradeOff` keeps nearly everything here only because the default
+weights are all +1, which rewards including every reaction; it is meant to be
+used with weights that carry both signs.
 
 ## Citation
 

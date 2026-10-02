@@ -25,13 +25,7 @@ from ._orientation import (
     validate_consistency_type,
 )
 from .exceptions import SpectraError, SpectraSolverError
-from .formulations import (
-    growth_optim,
-    min_net_dc,
-    min_net_lp,
-    min_net_milp,
-    trade_off,
-)
+from .formulations import growth_optim, min_net_lp, min_net_milp, trade_off
 
 if TYPE_CHECKING:
     from cobra.core import Model
@@ -41,10 +35,9 @@ logger = getLogger(__name__)
 
 MIN_NET_LP = "minNetLP"
 MIN_NET_MILP = "minNetMILP"
-MIN_NET_DC = "minNetDC"
 GROWTH_OPTIM = "growthOptim"
 TRADE_OFF = "tradeOff"
-PROBLEM_TYPES = (MIN_NET_LP, MIN_NET_MILP, MIN_NET_DC, GROWTH_OPTIM, TRADE_OFF)
+PROBLEM_TYPES = (MIN_NET_LP, MIN_NET_MILP, GROWTH_OPTIM, TRADE_OFF)
 
 #: Problem types that are mixed-integer, and so support pathway exclusion.
 MILP_PROBLEM_TYPES = (MIN_NET_MILP, TRADE_OFF)
@@ -340,8 +333,6 @@ def _solve_formulation(
 
     if problem_type == MIN_NET_LP:
         return min_net_lp(model, directions, weights, tol, steady_state)
-    if problem_type == MIN_NET_DC:
-        return min_net_dc(model, directions, weights, tol, steady_state)
     if problem_type == GROWTH_OPTIM:
         return growth_optim(model, directions, weights, tol, steady_state)
     if problem_type == MIN_NET_MILP:
