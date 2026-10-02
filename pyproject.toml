@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spectra-cobrapy"
+version = "0.1.0.dev0"
+description = "SPECTRA: scalable metabolic network reconstruction for cobrapy."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Pavan Kumar S" },
+]
+keywords = [
+    "metabolic network",
+    "constraint-based modeling",
+    "model extraction",
+    "cobrapy",
+    "SPECTRA",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+    "cobra >=0.29",
+    "numpy >=1.20",
+    "optlang >=1.8",
+]
+
+[project.optional-dependencies]
+development = ["black", "flake8", "isort", "pytest", "pytest-cov"]
+# The mixed-integer formulations run on glpk but are far faster on these.
+gurobi = ["gurobipy"]
+cplex = ["cplex"]
+
+[project.urls]
+Homepage = "https://github.com/NiravBhattLab/SPECTRA"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 88
+target-version = ["py39"]
+
+[tool.isort]
+profile = "black"
+line_length = 88
+lines_after_imports = 2
+known_first_party = ["spectra_cobrapy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
