@@ -76,9 +76,11 @@ zero, and minimises :math:`\sum_i w_i z_i`. That is the reaction count itself,
 not a relaxation, which is why it finds 16 where ``minNetLP`` finds 27.
 
 It is a MILP. On the textbook model that is instant; on a genome-scale model
-expect it to be slower by orders of magnitude, and use Gurobi or CPLEX. Cap
-the effort with ``time_limit`` (seconds, default 7200) — a solution found
-before the cap is used even if not proven optimal, with a warning.
+it does not finish at all, so use Gurobi or CPLEX and cap the effort with
+``time_limit`` (seconds, default 7200). A solution found before the cap is
+returned even if not proven optimal, with a warning. That is the normal
+outcome at genome scale, and the incumbent is still a far smaller model than
+``minNetLP`` gives — see :doc:`recon3d` for the measurements.
 
 .. code-block:: python
 

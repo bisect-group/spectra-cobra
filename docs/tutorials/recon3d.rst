@@ -371,13 +371,75 @@ Performance notes
      - ~50–75 s
      - ~0.05 s
    * - ``spectra_me`` (``minNetMILP``)
-     - minutes; set ``time_limit``
+     - does not finish; set ``time_limit``
      - ~0.8 s
 
 Most of the ``minNetLP`` time is spent constructing the LP — one
 absolute-value variable and two constraints per candidate reaction, so around
 11000 variables and 22000 constraints — not solving it. If you are extracting
 many models from one universal model, that construction cost is paid per call.
+
+Is minNetMILP worth it at this scale?
+-------------------------------------
+
+``minNetLP`` minimises the L1 norm of the flux as a proxy for the number of
+reactions; ``minNetMILP`` counts them exactly, with one binary per candidate.
+At genome scale that is an 11000-binary problem, and Gurobi does not come
+close to solving it. It is still worth running, because the proxy is loose
+enough that even a poor incumbent beats the LP by a wide margin.
+
+Each row below gave Gurobi ten minutes on the 11303-reaction model, against
+``minNetLP`` on the same core set:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 10 18 20 14 14 24
+
+   * - Core
+     - ``minNetLP``
+     - ``minNetMILP``
+     - Smaller by
+     - MIP gap
+     - Shared / LP only / MILP only
+   * - 10
+     - 170
+     - 100
+     - 41%
+     - 65.6%
+     - 78 / 92 / 22
+   * - 50
+     - 662
+     - 439
+     - 34%
+     - 53.5%
+     - 373 / 289 / 66
+   * - 200
+     - 1791
+     - 1551
+     - 13%
+     - 36.9%
+     - 1388 / 403 / 163
+
+Every model kept its whole core set, and no core reaction was blocked in any
+of them.
+
+Two things are worth reading off this. The advantage shrinks as the core
+grows, because a larger core forces more of the network and leaves less to
+choose; by a core of 200 the LP is within 13%. And the mixed-integer model is
+not a pruned version of the linear one — it includes reactions the LP left
+out, so the two pick genuinely different routes rather than one being a
+subset of the other.
+
+The solutions are far from proven: at a core of 10 the bound was 31 against
+an incumbent of 90, so a much smaller model may well exist. Treat
+``minNetMILP`` at this scale as "a better answer than the LP for ten minutes
+of effort", not as the minimum network.
+
+.. note::
+
+   A solve stopped at ``time_limit`` returns its incumbent and logs a
+   warning. Give it more time if the gap matters; the limit binds to the
+   second, so budget it directly.
 
 Reproducing this
 ----------------
