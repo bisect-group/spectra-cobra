@@ -259,8 +259,11 @@ which agreed on every count.
 | 500 | 3 | 2752–2792 | all | **15**, **16**, 0 | 5, 3 |
 
 **Core reactions are always present. But `minNetLP` does not guarantee a flux
-consistent model** — in most trials a few reactions in the result, *including
-some core reactions*, cannot carry flux in it.
+consistent model** — in several trials a few reactions in the result,
+*including some core reactions*, cannot carry flux in it. Dropping the
+`model.tolerance` floor from the inclusion cutoff (now `tol * 1e-7`, as in
+MATLAB) cuts the dead core reactions by 75%, from 16 to 4 across six trials,
+but does not eliminate them.
 
 The cause is the inclusion rule inherited from MATLAB: keep a reaction if its
 extraction-LP flux exceeds `tol * 1e-7`, floored here at `model.tolerance`, so

@@ -39,7 +39,6 @@ if TYPE_CHECKING:
 
 logger = getLogger(__name__)
 
-LARGE_VALUE = 1.0e6
 #: Lower and upper limit of the uniformly sampled objective coefficients,
 #: matching ``unifrnd(1, 1.1)`` in the MATLAB implementation.
 WEIGHT_RANGE = (1.0, 1.1)
@@ -175,18 +174,20 @@ def _push(
 
         if reverse:
             # z_i >= -tol and v_i <= z_i, minimised: drives v_i down to -tol.
-            var = prob.Variable(f"spectra_aux_{rxn_id}", lb=-tol, ub=LARGE_VALUE)
+            # Unbounded above, as ``reverse.m`` has +Inf: a finite bound
+            # would silently bind on a model with large flux bounds.
+            var = prob.Variable(f"spectra_aux_{rxn_id}", lb=-tol, ub=None)
             constraints.append(
                 prob.Constraint(
                     oriented_flux - var, name=f"spectra_aux_cons_{rxn_id}", ub=0.0
                 )
             )
         else:
-            # z_i <= tol and v_i >= z_i, maximised: drives v_i up to tol. The
-            # auxiliary variable is unbounded below so that a reaction unable
-            # to go positive merely fails to contribute, rather than making
-            # the whole LP infeasible.
-            var = prob.Variable(f"spectra_aux_{rxn_id}", lb=-LARGE_VALUE, ub=tol)
+            # z_i <= tol and v_i >= z_i, maximised: drives v_i up to tol.
+            # Unbounded below, as ``forwardcc.m`` has -Inf, so that a
+            # reaction unable to go positive merely fails to contribute
+            # rather than making the whole LP infeasible.
+            var = prob.Variable(f"spectra_aux_{rxn_id}", lb=None, ub=tol)
             constraints.append(
                 prob.Constraint(
                     oriented_flux - var, name=f"spectra_aux_cons_{rxn_id}", lb=0.0

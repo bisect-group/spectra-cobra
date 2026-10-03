@@ -26,18 +26,20 @@ Why this exists
 The first promise always holds; the second does not.
 
 ``minNetLP`` and ``growthOptim`` read their answer off a flux vector, keeping
-any reaction whose flux clears a cutoff near the solver tolerance. A few
-reactions end up carrying flux *just under* that cutoff while doing
-load-bearing balancing work, and dropping them leaves a mass-balance residual
-of the same order — above the solver's feasibility tolerance. The kept flux
-vector is then not actually feasible in the extracted model, and the chains
-that relied on those sub-cutoff reactions can carry no flux at all — **a core
-reaction included**.
+any reaction whose flux clears ``inclusion_cutoff``. That cutoff defaults to
+``tol * 1e-7``, deliberately far below the solver's own tolerance: raising it
+discards reactions that carry almost no flux but are load-bearing for a mass
+balance, and the chains that relied on them then collapse, leaving **core
+reactions present in the model but unable to carry flux**.
 
-On Recon3D this is measured, not hypothetical: see
-:doc:`../tutorials/recon3d`. The mixed-integer formulations should not have
-the problem, since a binary at zero forces its reaction's flux to exactly zero
-and so discards nothing.
+Keeping the cutoff that low fixes the core reactions at the price of also
+keeping some reactions that are there only because of numerical noise, so the
+model can still contain a few blocked non-core reactions. That trade is
+intentional — see :doc:`../tutorials/recon3d` for the measured effect — and
+``check_extraction`` is how you see which side of it you landed on.
+
+The mixed-integer formulations are unaffected either way, since they read
+their answer off their binaries rather than off the flux.
 
 The damaging case is a *blocked core reaction*. It is present in the model, so
 its presence alone suggests the extraction worked, but it cannot carry flux

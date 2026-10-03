@@ -286,6 +286,7 @@ def _solve_formulation(
     problem_type: str,
     time_limit: Optional[float],
     previous_solutions: Optional[List[Set[str]]] = None,
+    inclusion_cutoff: Optional[float] = None,
 ) -> Set[str]:
     """Dispatch to the requested network inference formulation.
 
@@ -332,9 +333,13 @@ def _solve_formulation(
         )
 
     if problem_type == MIN_NET_LP:
-        return min_net_lp(model, directions, weights, tol, steady_state)
+        return min_net_lp(
+            model, directions, weights, tol, steady_state, inclusion_cutoff
+        )
     if problem_type == GROWTH_OPTIM:
-        return growth_optim(model, directions, weights, tol, steady_state)
+        return growth_optim(
+            model, directions, weights, tol, steady_state, inclusion_cutoff
+        )
     if problem_type == MIN_NET_MILP:
         return min_net_milp(
             model,
@@ -401,6 +406,7 @@ def spectra_me(
     remove_genes: bool = False,
     previous_solutions: Optional[List[Set[str]]] = None,
     seed: Optional[int] = None,
+    inclusion_cutoff: Optional[float] = None,
 ) -> "Model":
     """Extract a context-specific model around a set of core reactions.
 
@@ -438,6 +444,14 @@ def spectra_me(
     time_limit : float, optional
         The maximum time to spend on each mixed-integer solve, in seconds
         (default 7200).
+    inclusion_cutoff : float, optional
+        The absolute flux at which a reaction counts as part of the extracted
+        model, for the LP formulations (default ``tol * 1e-7``). The default
+        is far below the solver's own tolerance on purpose: raising it drops
+        reactions that carry almost no flux but are load-bearing for a mass
+        balance, which leaves core reactions present in the result yet unable
+        to carry flux. The mixed-integer formulations ignore it, since they
+        read their answer off their binaries.
     remove_genes : bool, optional
         Whether to drop the genes left without a reaction (default False).
     previous_solutions : list of set of str, optional
@@ -480,6 +494,7 @@ def spectra_me(
         remove_genes=remove_genes,
         previous_solutions=previous_solutions,
         seed=seed,
+        inclusion_cutoff=inclusion_cutoff,
     )
     return models[0] if n_solutions == 1 else models
 
@@ -498,6 +513,7 @@ def _spectra_me(
     previous_solutions: Optional[List[Set[str]]],
     seed: Optional[int],
     blocked_ids: Optional[Set[str]] = None,
+    inclusion_cutoff: Optional[float] = None,
 ) -> Tuple[List["Model"], List[Set[str]]]:
     """Run the extraction, returning the models and the reaction sets found.
 
@@ -583,6 +599,7 @@ def _spectra_me(
                 problem_type,
                 time_limit,
                 exclude or None,
+                inclusion_cutoff,
             )
         except SpectraSolverError:
             # Excluding every solution found so far can leave the problem with
@@ -622,6 +639,7 @@ def spectra_ccme(
     time_limit: Optional[float] = 7200.0,
     remove_genes: bool = False,
     seed: Optional[int] = None,
+    inclusion_cutoff: Optional[float] = None,
 ) -> Tuple["Model", List[str]]:
     """Check consistency and extract a model in a single pass.
 
@@ -651,6 +669,14 @@ def spectra_ccme(
     time_limit : float, optional
         The maximum time to spend on each mixed-integer solve, in seconds
         (default 7200).
+    inclusion_cutoff : float, optional
+        The absolute flux at which a reaction counts as part of the extracted
+        model, for the LP formulations (default ``tol * 1e-7``). The default
+        is far below the solver's own tolerance on purpose: raising it drops
+        reactions that carry almost no flux but are load-bearing for a mass
+        balance, which leaves core reactions present in the result yet unable
+        to carry flux. The mixed-integer formulations ignore it, since they
+        read their answer off their binaries.
     remove_genes : bool, optional
         Whether to drop the genes left without a reaction (default False).
     seed : int, optional
@@ -737,6 +763,7 @@ def spectra_ccme(
         problem_type,
         time_limit,
         None,
+        inclusion_cutoff,
     )
     first = _extract(model, keep_ids, remove_genes)
 

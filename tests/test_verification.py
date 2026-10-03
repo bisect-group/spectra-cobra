@@ -89,11 +89,30 @@ def test_repr_is_a_one_liner(toy_model: Model) -> None:
 
 def test_topology_mode_is_honoured(blocked_model: Model) -> None:
     """Checking under the accumulation condition unblocks the dead end."""
-    steady = check_extraction(blocked_model, ["R1"], consistency_type="stoichiometry")
-    accumulating = check_extraction(blocked_model, ["R1"], consistency_type="topology")
+    steady = check_extraction(
+        blocked_model, ["R1"], consistency_type="stoichiometry", method="spectra"
+    )
+    accumulating = check_extraction(
+        blocked_model, ["R1"], consistency_type="topology", method="spectra"
+    )
 
     assert not steady.is_consistent
     assert accumulating.is_consistent
+
+
+def test_fva_refuses_topology(blocked_model: Model) -> None:
+    """FVA cannot answer the accumulation question, and says so.
+
+    cobrapy's find_blocked_reactions always assumes a steady state, so
+    silently accepting topology would check something other than what was
+    asked for.
+    """
+    import pytest
+
+    from spectra_cobra import SpectraError
+
+    with pytest.raises(SpectraError, match="topology"):
+        check_extraction(blocked_model, ["R1"], consistency_type="topology")
 
 
 def test_report_is_constructible_directly() -> None:
@@ -104,3 +123,32 @@ def test_report_is_constructible_directly() -> None:
     assert not report.is_valid
     assert not report.is_consistent
     assert report.blocked_core == ["a"]
+
+
+def test_rejects_an_unknown_method(toy_model: Model) -> None:
+    """An unrecognised check method is an error, not a silent fallback."""
+    import pytest
+
+    from spectra_cobra import SpectraError
+
+    extracted = spectra_me(toy_model, ["R3"], seed=0)
+    with pytest.raises(SpectraError, match="method"):
+        check_extraction(extracted, ["R3"], method="guess")
+
+
+def test_both_methods_agree_on_a_clean_model(toy_model: Model) -> None:
+    """On a well-behaved model FVA and the fast check give the same verdict."""
+    extracted = spectra_me(toy_model, ["R3"], seed=0)
+    by_fva = check_extraction(extracted, ["R3"], method="fva")
+    by_spectra = check_extraction(extracted, ["R3"], method="spectra")
+
+    assert by_fva.is_valid == by_spectra.is_valid
+    assert set(by_fva.blocked) == set(by_spectra.blocked)
+
+
+def test_fva_is_the_default(blocked_model: Model) -> None:
+    """The default method is the authoritative one."""
+    default = check_extraction(blocked_model, ["R1"])
+    by_fva = check_extraction(blocked_model, ["R1"], method="fva")
+
+    assert set(default.blocked) == set(by_fva.blocked)

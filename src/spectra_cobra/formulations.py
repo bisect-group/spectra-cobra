@@ -94,7 +94,9 @@ def _check_status(model: "Model", description: str, milp: bool = False) -> str:
     return status
 
 
-def _included_reactions(model: "Model", tol: float) -> Set[str]:
+def _included_reactions(
+    model: "Model", tol: float, inclusion_cutoff: Optional[float] = None
+) -> Set[str]:
     """Return the reactions carrying flux in the current solution.
 
     Parameters
@@ -103,6 +105,9 @@ def _included_reactions(model: "Model", tol: float) -> Set[str]:
         A model whose solver holds a solution.
     tol : float
         The flux threshold the formulation was given.
+    inclusion_cutoff : float, optional
+        The absolute flux at which a reaction counts as part of the model
+        (default ``tol * 1e-7``, as in MATLAB).
 
     Returns
     -------
@@ -111,14 +116,20 @@ def _included_reactions(model: "Model", tol: float) -> Set[str]:
 
     Notes
     -----
-    The MATLAB implementation uses ``tol * 1e-7`` outright, which for a
-    default ``tol`` sits well below any solver's own tolerance and so reads
-    numerical noise as flux. The cutoff is floored at ``model.tolerance``
-    here so that cannot happen.
+    The default is deliberately far below the solver's own tolerance, and
+    that is not an oversight. Raising it to something "sensible" such as
+    ``model.tolerance`` discards reactions that carry almost no flux but are
+    nonetheless load-bearing for a mass balance, and the chains that depended
+    on them then collapse: on Recon3D that leaves core reactions present in
+    the extracted model but unable to carry flux. Keeping the cutoff low
+    keeps those reactions, at the cost of also keeping some that are there
+    only because of numerical noise. The trade is deliberate — a slightly
+    dirtier model in exchange for core reactions that actually work.
 
     """
-    cutoff = max(tol * INCLUSION_CUTOFF_FACTOR, model.tolerance)
-    return {rxn.id for rxn in model.reactions if abs(rxn.flux) >= cutoff}
+    if inclusion_cutoff is None:
+        inclusion_cutoff = tol * INCLUSION_CUTOFF_FACTOR
+    return {rxn.id for rxn in model.reactions if abs(rxn.flux) >= inclusion_cutoff}
 
 
 def _included_from_indicators(
@@ -274,6 +285,7 @@ def min_net_lp(
     weights: Dict[str, float],
     tol: float,
     steady_state: bool = True,
+    inclusion_cutoff: Optional[float] = None,
 ) -> Set[str]:
     """Extract a model by minimising the weighted total absolute flux.
 
@@ -290,6 +302,11 @@ def min_net_lp(
         The minimum absolute flux a directed reaction has to carry.
     steady_state : bool, optional
         Whether to enforce ``S v = 0`` rather than ``S v >= 0`` (default True).
+    inclusion_cutoff : float, optional
+        The absolute flux at which a reaction counts as part of the extracted
+        model (default ``tol * 1e-7``). Raising it gives a smaller model but
+        risks dropping reactions that are load-bearing for a mass balance; see
+        :func:`_included_reactions`.
 
     Returns
     -------
@@ -319,7 +336,7 @@ def min_net_lp(
 
         model.slim_optimize()
         _check_status(model, "minNetLP problem")
-        return _included_reactions(model, tol)
+        return _included_reactions(model, tol, inclusion_cutoff)
 
 
 def min_net_milp(
@@ -551,6 +568,7 @@ def growth_optim(
     weights: Dict[str, float],
     tol: float,
     steady_state: bool = True,
+    inclusion_cutoff: Optional[float] = None,
 ) -> Set[str]:
     """Extract a model by maximising growth while penalising total flux.
 
@@ -569,6 +587,11 @@ def growth_optim(
         The minimum absolute flux a directed reaction has to carry.
     steady_state : bool, optional
         Whether to enforce ``S v = 0`` rather than ``S v >= 0`` (default True).
+    inclusion_cutoff : float, optional
+        The absolute flux at which a reaction counts as part of the extracted
+        model (default ``tol * 1e-7``). Raising it gives a smaller model but
+        risks dropping reactions that are load-bearing for a mass balance; see
+        :func:`_included_reactions`.
 
     Returns
     -------
@@ -620,7 +643,7 @@ def growth_optim(
 
         model.slim_optimize()
         _check_status(model, "growthOptim problem")
-        return _included_reactions(model, tol)
+        return _included_reactions(model, tol, inclusion_cutoff)
 
 
 def _set_time_limit(model: "Model", time_limit: Optional[float]) -> None:

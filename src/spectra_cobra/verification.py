@@ -25,8 +25,11 @@ rather than silent.
 from logging import getLogger
 from typing import TYPE_CHECKING, Iterable, List, Optional
 
+from cobra.flux_analysis import find_blocked_reactions
+
 from ._orientation import STOICHIOMETRY
 from .consistency import consistent_reaction_ids
+from .exceptions import SpectraError
 
 if TYPE_CHECKING:
     from cobra.core import Model
@@ -164,6 +167,7 @@ def check_extraction(
     consistency_type: str = STOICHIOMETRY,
     detection_cutoff: Optional[float] = None,
     seed: Optional[int] = None,
+    method: str = "fva",
 ) -> ExtractionReport:
     """Check an extracted model against what the extraction promised.
 
@@ -182,17 +186,33 @@ def check_extraction(
         same value, or the answer will not describe the model you have.
     consistency_type : {"stoichiometry", "topology"}, optional
         The consistency type the extraction was run with
-        (default "stoichiometry").
+        (default "stoichiometry"). Only used by ``method="spectra"``.
     detection_cutoff : float, optional
         The absolute flux at which a reaction counts as carrying flux
-        (default ``0.99 * tol``).
+        (default ``0.99 * tol`` for ``method="spectra"``, ``model.tolerance``
+        for ``method="fva"``).
     seed : int, optional
         A seed for the consistency check's random coefficients (default None).
+    method : {"fva", "spectra"}, optional
+        How to decide whether a reaction is blocked (default "fva"). Only
+        ``"spectra"`` supports ``consistency_type="topology"``.
+        ``"fva"`` maximises and minimises each reaction in turn with
+        :func:`cobra.flux_analysis.find_blocked_reactions`, which is slow but
+        authoritative. ``"spectra"`` reuses this package's own consistency
+        check, which is far quicker but **can report a dead reaction as
+        consistent** on a model holding numerically marginal reactions —
+        exactly the models an LP extraction produces. Use it only when the
+        speed matters more than the answer.
 
     Returns
     -------
     ExtractionReport
         What the model does and does not deliver.
+
+    Raises
+    ------
+    SpectraError
+        If `method` is not one of the two accepted values.
 
     Examples
     --------
@@ -202,21 +222,36 @@ def check_extraction(
 
     Notes
     -----
-    This solves a handful of LPs, so it is cheap next to the extraction
-    itself, and worth running whenever the result matters. See
-    :mod:`spectra_cobra.verification` for why an LP-based extraction can
-    return a model with blocked reactions in the first place.
+    The default is the slow, trustworthy option on purpose. Measured on
+    Recon3D extractions, the ``"spectra"`` method reported no blocked core
+    reactions where FVA found four, so a fast check here would hand back
+    false assurance about the very thing being checked.
 
     """
+    if method not in ("fva", "spectra"):
+        raise SpectraError(f'method must be "fva" or "spectra", not {method!r}.')
+    if method == "fva" and consistency_type != STOICHIOMETRY:
+        # find_blocked_reactions always assumes a steady state, so it cannot
+        # answer the question the accumulation condition asks. Saying so beats
+        # quietly checking something other than what was requested.
+        raise SpectraError(
+            f'method="fva" cannot check consistency_type={consistency_type!r}, '
+            f"because cobrapy's find_blocked_reactions always assumes a steady "
+            f'state. Pass method="spectra" to check the accumulation condition.'
+        )
+
     core_ids = [c if isinstance(c, str) else c.id for c in core_reactions]
     present = {rxn.id for rxn in extracted.reactions}
 
     missing_core = [c for c in core_ids if c not in present]
 
-    consistent, _ = consistent_reaction_ids(
-        extracted, tol, consistency_type, detection_cutoff, seed
-    )
-    blocked = [rxn.id for rxn in extracted.reactions if rxn.id not in consistent]
+    if method == "fva":
+        blocked = find_blocked_reactions(extracted, zero_cutoff=detection_cutoff)
+    else:
+        consistent, _ = consistent_reaction_ids(
+            extracted, tol, consistency_type, detection_cutoff, seed
+        )
+        blocked = [rxn.id for rxn in extracted.reactions if rxn.id not in consistent]
     blocked_core = [c for c in core_ids if c in set(blocked)]
 
     report = ExtractionReport(

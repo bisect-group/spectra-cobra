@@ -227,74 +227,93 @@ solving it.
    independent FVA-based ``find_blocked_reactions`` agree exactly on every
    count, so it is not a detection artefact.
 
-   The cause is the inclusion rule, which comes from MATLAB: a reaction is
-   kept if its flux in the extraction LP exceeds ``tol * 1e-7``, floored here
-   at ``model.tolerance``, so around ``1e-7``. A handful of reactions end up
-   carrying flux *just under* that cutoff while doing load-bearing balancing
-   work. Dropping them leaves a mass-balance residual of the same order — in
-   the trial examined, up to ``3.5e-07`` on ``coa[c]``, on 3 of 972
-   metabolites — which is above the solver's feasibility tolerance, so the
-   kept flux vector is not actually feasible in the extracted model. For the
-   chains that relied on those sub-cutoff reactions the only feasible flux is
-   then exactly zero: all 25 sampled blocked reactions had an attainable flux
-   of **0**, despite carrying around ``1e-4`` in the LP. They were mostly
-   exchange and transport pairs, such as ``EX_dxtrn[e]`` with ``DXTRNt``.
+   The cause was the inclusion rule. A reaction is kept if its flux in the
+   extraction LP exceeds ``inclusion_cutoff``, and that cutoff used to be
+   floored at ``model.tolerance``, so around ``1e-7``. A handful of reactions
+   carry flux *just under* that while doing load-bearing balancing work.
+   Dropping them leaves a mass-balance residual of the same order — up to
+   ``3.5e-07`` on ``coa[c]``, on 3 of 972 metabolites — above the solver's
+   feasibility tolerance, so the kept flux vector is not actually feasible in
+   the extracted model. The chains that relied on them then collapse: all 25
+   sampled blocked reactions had an attainable flux of **0** despite carrying
+   around ``1e-4`` in the LP, and they were mostly exchange and transport
+   pairs such as ``EX_dxtrn[e]`` with ``DXTRNt``.
 
-   Note what this is *not*. The total flux discarded is tiny — 1.6e-06 across
-   all 10376 dropped reactions — so this is not an accumulation of noise. It
-   is a few specific reactions below the cutoff whose absence breaks a chain
+   Note what this was *not*: the total flux discarded is tiny, 1.6e-06 across
+   all 10376 dropped reactions, so it was never an accumulation of noise. It
+   was a few specific sub-cutoff reactions whose absence breaks a chain
    outright.
 
-   **Always check the result** rather than assuming it:
+The fix: keep the cutoff low
+----------------------------
+
+The floor is gone. ``inclusion_cutoff`` now defaults to ``tol * 1e-7`` with no
+floor, which is also what MATLAB does, so those load-bearing reactions are
+kept and the chains survive. Judged by FVA on the extracted model, over the
+six trials that previously had dead core reactions:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 16 28 28 28
+
+   * - core/trial
+     - extracted (old → new)
+     - dead core, ``1e-7`` old
+     - dead core, ``tol*1e-7``
+   * - 50/2
+     - 927 → 957
+     - 4
+     - **1**
+   * - 200/0
+     - 1791 → 1791
+     - 0
+     - **0**
+   * - 200/1
+     - 1495 → 1725
+     - 2
+     - **2**
+   * - 200/2
+     - 1789 → 1798
+     - 2
+     - **1**
+   * - 500/0
+     - 2746 → 2752
+     - 5
+     - **0**
+   * - 500/1
+     - 2760 → 2775
+     - 3
+     - **0**
+   * - **total**
+     -
+     - **16**
+     - **4**
+
+**A 75% reduction, not elimination.** Four of the six trials come out with
+every core reaction able to carry flux; two do not. If your core set has to be
+fully viable, check the result and re-run with another ``seed``, or fall back
+to ``minNetMILP``.
+
+The cost is modest: usually a handful more reactions (+6 to +30), once +230.
+
+.. warning::
+
+   **Verify with FVA, not with this package's own check.** On these
+   extractions ``consistent_reaction_ids`` reported *no* blocked core
+   reactions where FVA found four. The extracted models deliberately contain
+   numerically marginal reactions, and the LP-driven check can report a dead
+   reaction as consistent on them. :func:`~spectra_cobra.check_extraction`
+   therefore defaults to ``method="fva"``:
 
    .. code-block:: python
 
-      from spectra_cobra import blocked_reaction_ids
+      from spectra_cobra import check_extraction
 
-      blocked = set(blocked_reaction_ids(extracted, tol=1e-4))
-      assert not blocked, f"{len(blocked)} blocked, {len(blocked & set(core))} core"
+      report = check_extraction(extracted, core, tol=1e-4)   # FVA by default
+      assert not report.blocked_core, report.summary()
 
-Getting a consistent model
---------------------------
-
-Two options, with different costs.
-
-**Use ``minNetMILP``.** A binary at zero forces its reaction's flux to
-*exactly* zero, so nothing sub-cutoff is discarded and the kept flux vector is
-exactly mass balanced. That is an argument from the formulation rather than a
-measurement: at a core size of 50 the genome-scale MILP did not finish within
-15 minutes on Gurobi, so it is untested at this scale, and the cost is real.
-Set ``time_limit`` and expect a feasible-but-not-proven-optimal answer.
-
-.. code-block:: python
-
-   extracted = spectra_me(model, core, tol=1e-4, problem_type="minNetMILP",
-                          time_limit=900, seed=0)
-
-**Or prune afterwards**, accepting that core reactions may be lost:
-
-.. code-block:: python
-
-   from spectra_cobra import consistent_reaction_ids
-
-   pruned = extracted.copy()
-   while True:
-       ids = {r.id for r in pruned.reactions}
-       ok, _ = consistent_reaction_ids(pruned, tol=1e-4, seed=0)
-       if ids == ok:
-           break
-       pruned.remove_reactions(sorted(ids - ok), remove_orphans=True)
-
-This converges in a couple of rounds and does give a consistent model, but it
-removed between two and five core reactions in the trials above — so check
-what survived before relying on it:
-
-.. code-block:: python
-
-   survived = {r.id for r in pruned.reactions}
-   print(f"core kept after pruning: {sum(c in survived for c in core)}/{len(core)}")
-
-Raising ``tol`` does not help, and lowering it makes the dust problem worse.
+   ``method="spectra"`` is available and much faster, but treat its verdict as
+   a screen rather than a guarantee.
 
 Occasional direction failures
 -----------------------------

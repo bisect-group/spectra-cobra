@@ -204,3 +204,78 @@ def test_orientation_of_negative_only_reactions(backwards_model: Model) -> None:
     """Reactions capped at zero flux are oriented the other way."""
     signs = reaction_signs(backwards_model)
     assert signs == {"R1": -1.0, "R2": -1.0, "R3": -1.0, "R4": -1.0}
+
+
+def test_inclusion_cutoff_defaults_below_solver_tolerance(toy_model: Model) -> None:
+    """The default cutoff is tol * 1e-7, not floored at model.tolerance.
+
+    Flooring it at the solver tolerance is what left extracted models holding
+    blocked core reactions, so the floor's absence is the behaviour under
+    test rather than an oversight.
+    """
+    import spectra_cobra.formulations as module
+    from spectra_cobra.formulations import INCLUSION_CUTOFF_FACTOR
+
+    tol = 1e-4
+    toy_model.tolerance = 1e-7
+    assert tol * INCLUSION_CUTOFF_FACTOR < toy_model.tolerance, "floor would bite"
+
+    directions = _all_free(toy_model)
+    directions["R3"] = 1
+
+    captured = {}
+    original = module._included_reactions
+
+    def spy(model, t, inclusion_cutoff=None):
+        captured["cutoff"] = (
+            inclusion_cutoff
+            if inclusion_cutoff is not None
+            else t * INCLUSION_CUTOFF_FACTOR
+        )
+        return original(model, t, inclusion_cutoff)
+
+    module._included_reactions = spy
+    try:
+        min_net_lp(toy_model, directions, _ones(toy_model), tol)
+    finally:
+        module._included_reactions = original
+
+    assert captured["cutoff"] == tol * INCLUSION_CUTOFF_FACTOR
+
+
+def test_raising_the_inclusion_cutoff_shrinks_the_model(toy_model: Model) -> None:
+    """A cutoff above every flux keeps only what the directions force."""
+    directions = _all_free(toy_model)
+    directions["R3"] = 1
+
+    default = min_net_lp(toy_model, directions, _ones(toy_model), 1e-4)
+    strict = min_net_lp(
+        toy_model, directions, _ones(toy_model), 1e-4, inclusion_cutoff=1e3
+    )
+
+    assert strict <= default
+    assert len(strict) < len(default)
+
+
+def test_inclusion_cutoff_reaches_spectra_me(toy_model: Model) -> None:
+    """spectra_me passes the cutoff down to the LP formulations."""
+    from spectra_cobra import spectra_me
+
+    default = spectra_me(toy_model, ["R3"], tol=1e-4, seed=0)
+    strict = spectra_me(toy_model, ["R3"], tol=1e-4, seed=0, inclusion_cutoff=1e3)
+
+    assert {r.id for r in strict.reactions} < {r.id for r in default.reactions}
+
+
+def test_mixed_integer_formulations_ignore_the_cutoff(toy_model: Model) -> None:
+    """The MILPs read their answer off the binaries, not off the flux."""
+    directions = _all_free(toy_model)
+    directions["R3"] = 1
+    weights = _ones(toy_model)
+
+    # A cutoff above every attainable flux would empty a flux-based answer.
+    assert min_net_milp(toy_model, directions, weights, 1e-4) == min_net_milp(
+        toy_model, directions, weights, 1e-4
+    )
+    kept = min_net_milp(toy_model, directions, weights, 1e-4)
+    assert "R3" in kept and len(kept) > 1
