@@ -266,3 +266,39 @@ def test_no_warning_when_the_tolerance_is_tight(toy_model: Model, caplog) -> Non
         spectra_me(toy_model, ["R3"], tol=1e-4, seed=0)
 
     assert not any("model.tolerance" in r.message for r in caplog.records)
+
+
+def test_lp_weights_follow_the_reaction_not_the_iteration_order(
+    toy_model: Model,
+) -> None:
+    """A seeded run must weight the same reaction the same way every time.
+
+    The random objective coefficients are drawn as one block and zipped
+    against the auxiliary variables positionally, and those variables follow
+    the order of the identifiers handed in. Callers pass a set, whose
+    iteration order varies with ``PYTHONHASHSEED``, so without an explicit
+    order the same seed would weight a different reaction in every process
+    and the extraction would not be reproducible between runs.
+    """
+    import numpy as np
+
+    from spectra_cobra._lp import forward_cc
+    from spectra_cobra._orientation import reaction_signs
+
+    def coefficients(order: List[str]) -> dict:
+        with toy_model:
+            forward_cc(
+                toy_model,
+                order,
+                reaction_signs(toy_model),
+                1e-3,
+                np.random.default_rng(0),
+            )
+            aux = [v for v in toy_model.variables if v.name.startswith("spectra_aux_")]
+            linear = toy_model.objective.get_linear_coefficients(aux)
+            return {var.name: float(value) for var, value in linear.items()}
+
+    forwards = coefficients(["R2", "R3", "R4"])
+    backwards = coefficients(["R4", "R3", "R2"])
+    assert forwards, "the LP should have built auxiliary variables"
+    assert forwards == backwards

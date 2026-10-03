@@ -163,7 +163,12 @@ def _push(
         and `raise_on_failure` is not set.
 
     """
-    rxn_ids = list(rxn_ids)
+    # Sorted, not merely listed: the objective coefficients below are drawn
+    # in one block and zipped against the variables positionally, so the
+    # order decides which reaction gets which weight. Callers pass a set of
+    # identifiers, whose iteration order varies with PYTHONHASHSEED, and that
+    # would make a seeded run irreproducible between processes.
+    rxn_ids = sorted(rxn_ids)
     prob = model.problem
     aux_vars = []
     constraints = []

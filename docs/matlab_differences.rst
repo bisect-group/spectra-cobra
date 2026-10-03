@@ -92,7 +92,8 @@ Smaller changes
      - Change
    * - Reproducibility
      - Every routine takes ``seed``, so the randomised objective
-       coefficients can be pinned. MATLAB's ``unifrnd`` cannot be.
+       coefficients can be pinned, in a way that holds between processes as
+       well as within one. MATLAB's ``unifrnd`` cannot be pinned at all.
    * - Pathway exclusion
      - Returns the solutions that exist when the network runs out, like
        MATLAB's ``break``, rather than raising.

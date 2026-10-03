@@ -142,6 +142,32 @@ kept; ``remove_genes=True`` prunes them:
 
    extracted = spectra_me(consistent, ["PGI"], tol=1e-3, remove_genes=True)
 
+Reproducibility
+---------------
+
+The direction phase breaks ties between core reactions with randomised
+objective coefficients, so an unseeded run returns a different model each
+time. ``seed`` pins them, and it does so across processes as well as within
+one:
+
+.. code-block:: python
+
+   a = spectra_me(consistent, core, tol=1e-3, seed=0)
+   b = spectra_me(consistent, core, tol=1e-3, seed=0)
+   assert {r.id for r in a.reactions} == {r.id for r in b.reactions}
+
+That second guarantee is worth stating because it is easy to lose. The
+coefficients are drawn as one block and attached to the auxiliary variables
+in order, and the core set arrives as a Python ``set``, whose iteration order
+depends on ``PYTHONHASHSEED`` and so differs between interpreter runs. The
+identifiers are therefore sorted before the LP is built, which keeps each
+reaction's coefficient tied to the reaction rather than to its position.
+Without that, a seeded run reproduces only inside a single process.
+
+The solver is the remaining source of variation. On Recon3D, repeated
+extractions at a fixed seed returned byte-identical reaction sets, so in
+practice Gurobi is deterministic here; a solver that is not would still vary.
+
 Next
 ----
 
