@@ -239,3 +239,30 @@ def test_remove_genes_drops_orphans(toy_model: Model) -> None:
     assert "R7" not in _ids(kept) and "R7" not in _ids(pruned)
     assert "g_used" in {g.id for g in pruned.genes}
     assert len({g.id for g in pruned.genes}) <= len({g.id for g in kept.genes})
+
+
+def test_warns_when_the_solver_tolerance_is_loose(toy_model: Model, caplog) -> None:
+    """A solver tolerance close to tol is called out.
+
+    This is the setting that left core reactions present in a Recon3D
+    extraction but unable to carry flux, and it is not one a caller would
+    think to check, so it warns rather than failing quietly.
+    """
+    import logging
+
+    toy_model.tolerance = 1e-7
+    with caplog.at_level(logging.WARNING, logger="spectra_cobra.extraction"):
+        spectra_me(toy_model, ["R3"], tol=1e-4, seed=0)
+
+    assert any("model.tolerance" in r.message for r in caplog.records)
+
+
+def test_no_warning_when_the_tolerance_is_tight(toy_model: Model, caplog) -> None:
+    """A properly tightened solver draws no complaint."""
+    import logging
+
+    toy_model.tolerance = 1e-9
+    with caplog.at_level(logging.WARNING, logger="spectra_cobra.extraction"):
+        spectra_me(toy_model, ["R3"], tol=1e-4, seed=0)
+
+    assert not any("model.tolerance" in r.message for r in caplog.records)

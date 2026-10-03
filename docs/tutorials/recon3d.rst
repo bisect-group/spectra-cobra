@@ -244,66 +244,76 @@ solving it.
    was a few specific sub-cutoff reactions whose absence breaks a chain
    outright.
 
-The fix: keep the cutoff low
-----------------------------
+Two settings that decide whether it works
+-----------------------------------------
 
-The floor is gone. ``inclusion_cutoff`` now defaults to ``tol * 1e-7`` with no
-floor, which is also what MATLAB does, so those load-bearing reactions are
-kept and the chains survive. Judged by FVA on the extracted model, over the
-six trials that previously had dead core reactions:
+The blocked core reactions above came from two numerical settings, not from
+the algorithm. Fixing both removes the problem entirely.
+
+**1. Tighten the solver.** This is the big one, and the least obvious. The
+extraction reads its answer off an LP solution whose mass balance holds only
+to the solver's feasibility tolerance. At cobrapy's default of ``1e-7``, that
+residual is enough to break chains carrying flux of order ``tol = 1e-4``. Set
+it as low as the solver allows — ``1e-9`` is the floor on Gurobi and CPLEX:
+
+.. code-block:: python
+
+   model.tolerance = 1e-9
+
+**2. Do not floor the inclusion cutoff.** A reaction joins the extracted
+model when its flux clears ``inclusion_cutoff``, which defaults to
+``tol * 1e-7`` — far below the solver tolerance, deliberately. Raising it to
+something that looks more sensible discards reactions that carry almost no
+flux but are load-bearing for a mass balance, and the chains that relied on
+them collapse.
+
+Measured over the same twelve Recon3D trials, with every core reaction's
+attainable flux checked by FVA:
 
 .. list-table::
    :header-rows: 1
-   :widths: 16 28 28 28
+   :widths: 46 27 27
 
-   * - core/trial
-     - extracted (old → new)
-     - dead core, ``1e-7`` old
-     - dead core, ``tol*1e-7``
-   * - 50/2
-     - 927 → 957
+   * - Configuration
+     - Dead core reactions
+     - Trials affected
+   * - cutoff floored at ``model.tolerance``, solver ``1e-7``
+     - 16
+     - 5 of 12, plus 1 hard failure
+   * - cutoff ``tol * 1e-7``, solver ``1e-7``
      - 4
-     - **1**
-   * - 200/0
-     - 1791 → 1791
-     - 0
+     - 2 of 12
+   * - cutoff ``tol * 1e-7``, solver ``1e-9``
      - **0**
-   * - 200/1
-     - 1495 → 1725
-     - 2
-     - **2**
-   * - 200/2
-     - 1789 → 1798
-     - 2
-     - **1**
-   * - 500/0
-     - 2746 → 2752
-     - 5
-     - **0**
-   * - 500/1
-     - 2760 → 2775
-     - 3
-     - **0**
-   * - **total**
-     -
-     - **16**
-     - **4**
+     - **none**
 
-**A 75% reduction, not elimination.** Four of the six trials come out with
-every core reaction able to carry flux; two do not. If your core set has to be
-fully viable, check the result and re-run with another ``seed``, or fall back
-to ``minNetMILP``.
+With both in place every one of the twelve trials returns a model containing
+all of its core reactions, every one of them able to carry flux, with no
+failures — and slightly faster, at 46–50 s rather than 50–61 s.
 
-The cost is modest: usually a handful more reactions (+6 to +30), once +230.
+:func:`~spectra_cobra.spectra_me` warns when ``model.tolerance`` is within a
+factor of 1e4 of ``tol``, since this is not a setting most callers would
+think to check.
+
+.. code-block:: text
+
+   model.tolerance is 1e-07 against tol=0.0001, a ratio of only 1000. The
+   extraction reads its answer off an LP whose mass balance holds to the
+   solver's tolerance, so a loose one can leave core reactions present in the
+   result but unable to carry flux. Set model.tolerance=1e-9, the lowest most
+   solvers accept, before extracting.
+
+Verifying the result
+--------------------
 
 .. warning::
 
    **Verify with FVA, not with this package's own check.** On these
-   extractions ``consistent_reaction_ids`` reported *no* blocked core
-   reactions where FVA found four. The extracted models deliberately contain
-   numerically marginal reactions, and the LP-driven check can report a dead
-   reaction as consistent on them. :func:`~spectra_cobra.check_extraction`
-   therefore defaults to ``method="fva"``:
+   extractions ``consistent_reaction_ids`` reported no blocked core reactions
+   where FVA found four. The extracted models hold numerically marginal
+   reactions by design, and the LP-driven check can call a dead one
+   consistent. :func:`~spectra_cobra.check_extraction` therefore defaults to
+   ``method="fva"``:
 
    .. code-block:: python
 

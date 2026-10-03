@@ -258,12 +258,21 @@ which agreed on every count.
 | 200 | 3 | 1495–1791 | all (1 failed) | **37**, **19** | 2, 2 |
 | 500 | 3 | 2752–2792 | all | **15**, **16**, 0 | 5, 3 |
 
-**Core reactions are always present. But `minNetLP` does not guarantee a flux
-consistent model** — in several trials a few reactions in the result,
-*including some core reactions*, cannot carry flux in it. Dropping the
-`model.tolerance` floor from the inclusion cutoff (now `tol * 1e-7`, as in
-MATLAB) cuts the dead core reactions by 75%, from 16 to 4 across six trials,
-but does not eliminate them.
+Core reactions are always present. Whether they can actually *carry flux*
+turned out to hinge on two numerical settings rather than on the algorithm:
+
+| Configuration | dead core reactions | trials affected |
+|---|---|---|
+| inclusion cutoff floored at `model.tolerance`, solver `1e-7` | 16 | 5 of 12, + 1 failure |
+| cutoff `tol * 1e-7`, solver `1e-7` | 4 | 2 of 12 |
+| cutoff `tol * 1e-7`, **solver `1e-9`** | **0** | **none** |
+
+So: do not floor the inclusion cutoff, and **set `model.tolerance = 1e-9`**
+(the lowest Gurobi and CPLEX accept) before extracting. The extraction reads
+its answer off an LP whose mass balance holds only to the solver's tolerance,
+and at the `1e-7` default that residual is enough to break chains carrying
+flux of order `tol`. `spectra_me` warns when the two are within a factor of
+1e4.
 
 The cause is the inclusion rule inherited from MATLAB: keep a reaction if its
 extraction-LP flux exceeds `tol * 1e-7`, floored here at `model.tolerance`, so

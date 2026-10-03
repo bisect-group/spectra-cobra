@@ -54,6 +54,47 @@ DIRECTION_CUTOFF_FACTOR = 1e-1
 #: flux of successive iterations, matching ``unifrnd(0.45, 0.55)``.
 BLEND_RANGE = (0.45, 0.55)
 
+#: How far below `tol` a model's solver tolerance should sit. The extraction
+#: reads its answer off an LP solution whose mass balance holds only to the
+#: solver's tolerance, and a residual of that size breaks the chains carrying
+#: flux of order `tol`, which can leave core reactions unable to carry flux.
+#: Calibrated on Recon3D: a ratio of 1e3 left dead core reactions, 1e5 left
+#: none.
+MIN_TOLERANCE_RATIO = 1e4
+
+
+def _warn_on_loose_tolerance(model: "Model", tol: float) -> None:
+    """Warn when the solver's tolerance is too loose for the flux threshold.
+
+    Parameters
+    ----------
+    model : cobra.Model
+        The model about to be extracted from.
+    tol : float
+        The flux threshold the extraction will use.
+
+    Notes
+    -----
+    This is the single most effective knob on extraction quality, and it is
+    not one most callers would think to touch, so it is worth saying out
+    loud rather than leaving in the documentation.
+
+    """
+    ratio = tol / model.tolerance if model.tolerance else float("inf")
+    if ratio >= MIN_TOLERANCE_RATIO:
+        return
+    logger.warning(
+        "model.tolerance is %.3g against tol=%.3g, a ratio of only %.0f. The "
+        "extraction reads its answer off an LP whose mass balance holds to "
+        "the solver's tolerance, so a loose one can leave core reactions "
+        "present in the result but unable to carry flux. Set "
+        "model.tolerance=1e-9, the lowest most solvers accept, before "
+        "extracting.",
+        model.tolerance,
+        tol,
+        ratio,
+    )
+
 
 def _normalise_weights(
     model: "Model", weights: Optional[Dict[str, float]]
@@ -481,6 +522,7 @@ def spectra_me(
     spectra_ccme : The same, for a model that is not known to be consistent.
 
     """
+    _warn_on_loose_tolerance(model, tol)
     models, _ = _spectra_me(
         model,
         core_reactions,
@@ -703,6 +745,7 @@ def spectra_ccme(
 
     """
     steady_state = validate_consistency_type(consistency_type)
+    _warn_on_loose_tolerance(model, tol)
     core_ids = _normalise_core(model, core_reactions)
     signs = reaction_signs(model)
     rng = np.random.default_rng(seed)
