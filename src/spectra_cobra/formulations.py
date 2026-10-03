@@ -24,7 +24,7 @@ from logging import getLogger
 from typing import TYPE_CHECKING, Dict, List, Optional, Set
 
 from cobra.util.solver import linear_reaction_coefficients
-from optlang.interface import FEASIBLE, OPTIMAL
+from optlang.interface import FEASIBLE, OPTIMAL, TIME_LIMIT
 from optlang.symbolics import Zero, add
 
 from ._orientation import (
@@ -44,8 +44,11 @@ logger = getLogger(__name__)
 
 #: Statuses a MILP may stop at and still carry a usable solution. The MATLAB
 #: implementation accepts ``stat == 1 || stat == 3``, i.e. optimal or a
-#: feasible solution found before the time limit.
-ACCEPTABLE_MILP_STATUSES = (OPTIMAL, FEASIBLE)
+#: feasible solution found before the time limit. ``TIME_LIMIT`` belongs here
+#: because that is what Gurobi reports when it stops at `time_limit` holding
+#: an incumbent, which is the whole point of setting a limit; it can also be
+#: reported with no solution at all, so :func:`_has_solution` checks.
+ACCEPTABLE_MILP_STATUSES = (OPTIMAL, FEASIBLE, TIME_LIMIT)
 
 #: The fraction of `tol` below which a flux counts as zero when reading the
 #: extracted reaction set off a solution, matching ``tol * 1e-7`` in MATLAB.
@@ -85,6 +88,13 @@ def _check_status(model: "Model", description: str, milp: bool = False) -> str:
             status=status,
         )
     if status != OPTIMAL:
+        if not _has_solution(model):
+            raise SpectraSolverError(
+                f"The {description} terminated with status {status!r} before "
+                f"finding any feasible solution. Allow it more time, or use a "
+                f"linear formulation such as minNetLP.",
+                status=status,
+            )
         logger.warning(
             "The %s stopped at status %r rather than optimality; the returned "
             "model is feasible but may not be minimal.",
@@ -92,6 +102,35 @@ def _check_status(model: "Model", description: str, milp: bool = False) -> str:
             status,
         )
     return status
+
+
+def _has_solution(model: "Model") -> bool:
+    """Return whether the solver is holding a solution that can be read.
+
+    Parameters
+    ----------
+    model : cobra.Model
+        The model that was just optimized.
+
+    Returns
+    -------
+    bool
+        Whether an objective value, and so a solution, is available.
+
+    Notes
+    -----
+    A mixed-integer solve stopped at its time limit may or may not have found
+    an incumbent, and the distinction is only visible by trying to read one.
+    Each interface raises its own exception type when there is nothing to
+    read, none of which can be imported without depending on that solver, so
+    the exception is caught broadly on purpose.
+
+    """
+    try:
+        value = model.solver.objective.value
+    except Exception:  # noqa: BLE001 - see the note above.
+        return False
+    return value is not None and not math.isnan(value)
 
 
 def _included_reactions(

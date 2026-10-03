@@ -279,3 +279,64 @@ def test_mixed_integer_formulations_ignore_the_cutoff(toy_model: Model) -> None:
     )
     kept = min_net_milp(toy_model, directions, weights, 1e-4)
     assert "R3" in kept and len(kept) > 1
+
+
+class _StubSolver:
+    """A solver that reports a status and either holds a solution or does not."""
+
+    class _Objective:
+        def __init__(self, value):
+            self._value = value
+
+        @property
+        def value(self):
+            if isinstance(self._value, Exception):
+                raise self._value
+            return self._value
+
+    def __init__(self, status, value):
+        self.status = status
+        self.objective = self._Objective(value)
+
+
+class _StubModel:
+    """Just enough of a model for :func:`_check_status` to inspect."""
+
+    def __init__(self, status, value):
+        self.solver = _StubSolver(status, value)
+
+
+def test_a_time_limited_milp_keeps_its_incumbent(caplog) -> None:
+    """Stopping at the time limit with a solution is the point of the limit.
+
+    Gurobi reports ``time_limit`` rather than ``feasible`` when it stops
+    holding an incumbent, so leaving that status out made ``time_limit``
+    useless: the solution it had paid for was discarded.
+    """
+    from spectra_cobra.formulations import _check_status
+
+    model = _StubModel("time_limit", 90.0)
+    with caplog.at_level("WARNING"):
+        assert _check_status(model, "minNetMILP problem", milp=True) == "time_limit"
+    assert "rather than optimality" in caplog.text
+
+
+def test_a_time_limited_milp_without_a_solution_is_an_error() -> None:
+    """The same status with nothing to read has to be reported, not returned."""
+    from spectra_cobra.exceptions import SpectraSolverError
+    from spectra_cobra.formulations import _check_status
+
+    for value in (None, float("nan"), RuntimeError("no solution available")):
+        model = _StubModel("time_limit", value)
+        with pytest.raises(SpectraSolverError, match="before finding any feasible"):
+            _check_status(model, "minNetMILP problem", milp=True)
+
+
+def test_an_lp_still_demands_optimality() -> None:
+    """The relaxed statuses are for mixed-integer solves only."""
+    from spectra_cobra.exceptions import SpectraSolverError
+    from spectra_cobra.formulations import _check_status
+
+    model = _StubModel("time_limit", 90.0)
+    with pytest.raises(SpectraSolverError, match="instead of reaching optimality"):
+        _check_status(model, "minNetLP problem")
