@@ -164,9 +164,15 @@ identifiers are therefore sorted before the LP is built, which keeps each
 reaction's coefficient tied to the reaction rather than to its position.
 Without that, a seeded run reproduces only inside a single process.
 
-The solver is the remaining source of variation. On Recon3D, repeated
-extractions at a fixed seed returned byte-identical reaction sets, so in
-practice Gurobi is deterministic here; a solver that is not would still vary.
+On Recon3D this was measured both ways. Before the identifiers were sorted,
+two processes given the same seed, ``tol`` and solver tolerance extracted
+1773 and 1797 reactions from the same core set of 200. After, three
+processes started under ``PYTHONHASHSEED`` 0, 1 and 2 returned identical
+reaction sets at core sizes 50, 200 and 500, and four repeats within one
+process agreed as well.
+
+The solver is the remaining source of variation. Gurobi proved deterministic
+across all of those runs; a solver that is not would still vary.
 
 Next
 ----
