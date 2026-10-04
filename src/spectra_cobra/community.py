@@ -368,9 +368,18 @@ def build_community_model(
             if met.compartment != external_compartment:
                 continue
             if met.id not in shared:
+                # Both conventions for naming a compartment are in use:
+                # "glc_D_e" and "glc_D[e]". Strip either so the shared pool
+                # is named after the metabolite rather than after one
+                # organism's spelling of where it sits.
                 base = met.id
-                if base.endswith(f"_{external_compartment}"):
-                    base = base[: -(len(external_compartment) + 1)]
+                for suffix in (
+                    f"_{external_compartment}",
+                    f"[{external_compartment}]",
+                ):
+                    if base.endswith(suffix):
+                        base = base[: -len(suffix)]
+                        break
                 pooled = Metabolite(
                     f"{base}_{shared_compartment}",
                     formula=met.formula,

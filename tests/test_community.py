@@ -179,3 +179,37 @@ def test_organism_names_are_validated(pair, names, message) -> None:
     """The names become identifier suffixes, so they have to be usable."""
     with pytest.raises(SpectraError, match=message):
         build_community_model(list(pair), organisms=names)
+
+
+@pytest.mark.parametrize("spelling", ["{}_e", "{}[e]"])
+def test_both_compartment_spellings_share_a_pool(solver: str, spelling) -> None:
+    """ "glc_e" and "glc[e]" must both reach the same shared metabolite.
+
+    Model collections differ on this, and getting it wrong does not fail
+    loudly: each organism would simply trade through its own private pool
+    named after its own spelling, and the community would never cross-feed.
+    """
+    from cobra import Metabolite, Model, Reaction
+
+    def organism(name: str) -> Model:
+        model = Model(name)
+        outside = Metabolite(spelling.format("glc"), compartment="e")
+        inside = Metabolite("x_c", compartment="c")
+        model.add_metabolites([outside, inside])
+        uptake = Reaction("UP", lower_bound=0.0, upper_bound=1000.0)
+        biomass = Reaction("biomass", lower_bound=0.0, upper_bound=1000.0)
+        model.add_reactions([uptake, biomass])
+        uptake.add_metabolites({outside: -1.0, inside: 1.0})
+        biomass.add_metabolites({inside: -1.0})
+        model.add_boundary(outside, type="exchange")
+        model.objective = biomass
+        model.solver = solver
+        return model
+
+    community = build_community_model(
+        [organism("a"), organism("b")], organisms=["A", "B"]
+    )
+
+    pooled = [m.id for m in community.model.metabolites if m.compartment == "u"]
+    assert pooled == ["glc_u"], f"got {pooled}"
+    assert "EX_glc_u" in community.model.reactions
