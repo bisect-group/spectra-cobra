@@ -109,6 +109,7 @@ Citation
    tutorials/topology
    tutorials/gapfilling_tasks
    tutorials/gapfilling_media
+   tutorials/minimal_microbiome
    tutorials/recon3d
 
 .. toctree::
