@@ -214,6 +214,11 @@ def task_constraints(model: "Model", task: "MetabolicTask") -> Iterator["Model"]
     task's inputs and outputs, and the task's equations are added. Everything
     is undone on the way out.
 
+    A metabolite named as both an input and an output may flow either way:
+    both reactions are built. That is what naming it twice says. The
+    published file format cannot express it, and
+    :func:`parse_task_list` resolves the ambiguity there instead.
+
     Parameters
     ----------
     model : cobra.Model
@@ -709,6 +714,26 @@ def parse_task_list(
                         missing.append(reference)
                         continue
                     target[met_id] = bounds
+
+            # The file has one bound column per direction, so a metabolite
+            # written in both IN and OUT has two readings and no way to say
+            # which was meant. RAVEN assigns its metabolite bounds for the
+            # inputs and then for the outputs, so the output wins; matching
+            # that keeps a published list behaving as its authors saw it.
+            # This is applied to the row's own columns only -- free_inputs
+            # and free_outputs below are the caller saying a metabolite may
+            # flow either way, and both of those are honoured.
+            shadowed = sorted(set(inputs) & set(outputs))
+            if shadowed:
+                logger.info(
+                    "task %s: %d metabolite(s) are written as both input and "
+                    "output; taking the output, as the format's readers do: %s",
+                    task_id,
+                    len(shadowed),
+                    shadowed[:5],
+                )
+                for met_id in shadowed:
+                    del inputs[met_id]
 
             for reference in free_inputs:
                 met_id = _resolve_reference(reference, index)

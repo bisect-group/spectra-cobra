@@ -315,3 +315,107 @@ def test_an_equation_keeps_the_proton_together(task_model: Model) -> None:
 
     assert unresolved == [], f"the proton was sheared apart: {unresolved}"
     assert stoichiometry == {"atp": -1.0, "h2o": -1.0, "adp": 1.0, "h": 1.0}
+
+
+def test_a_metabolite_in_both_lists_may_flow_either_way(solver: str) -> None:
+    """Naming a metabolite twice says it may go both ways, and it does.
+
+    The ambiguity belongs to the published file format, which has one bound
+    column per direction and no way to say which was meant; the parser
+    resolves it there. A task built directly says what it says, so with an
+    input of (1, 1) and an output of (0, 1000) the forced unit of supply
+    takes the top of the range from 1000 down to 999: the drain has to
+    carry that unit as well as everything the network made.
+    """
+    from cobra import Metabolite
+    from cobra import Model as CobraModel
+    from cobra import Reaction
+
+    from spectra_cobra.tasks import task_constraints
+
+    def build() -> CobraModel:
+        model = CobraModel("both")
+        made = Metabolite("M", compartment="c")
+        fed = Metabolite("S", compartment="c")
+        model.add_metabolites([made, fed])
+        convert = Reaction("R", lower_bound=-1000.0, upper_bound=1000.0)
+        source = Reaction("SRC", lower_bound=-1000.0, upper_bound=1000.0)
+        model.add_reactions([convert, source])
+        convert.add_metabolites({fed: -1.0, made: 1.0})
+        source.add_metabolites({fed: 1.0})
+        model.solver = solver
+        return model
+
+    def net_range(task) -> tuple:
+        model = build()
+        with task_constraints(model, task) as constrained:
+            built = {
+                r.id for r in constrained.reactions if r.id.startswith("spectra_task_")
+            }
+            span = []
+            for direction in ("max", "min"):
+                constrained.objective = constrained.reactions.R
+                constrained.objective.direction = direction
+                span.append(constrained.slim_optimize())
+        return built, (round(span[1], 6), round(span[0], 6))
+
+    feed = {"S": (0.0, 1000.0)}
+    output_only, span_out = net_range(
+        MetabolicTask("t", inputs=feed, outputs={"M": (0.0, 1000.0)})
+    )
+    both, span_both = net_range(
+        MetabolicTask(
+            "t", inputs={**feed, "M": (1.0, 1.0)}, outputs={"M": (0.0, 1000.0)}
+        )
+    )
+
+    assert span_out == (0.0, 1000.0)
+    # The lower end stays at 0 because the supply of S cannot run backwards,
+    # not because the input declaration was dropped; the upper end is what
+    # shows it was honoured.
+    assert span_both == (0.0, 999.0), "both declarations should be honoured"
+    assert len(both) == len(output_only) + 1
+
+
+def test_the_parser_takes_the_output_when_a_row_says_both(task_model: Model) -> None:
+    """The file format cannot express "either way", so the output wins.
+
+    RAVEN assigns its metabolite bounds for the inputs and then for the
+    outputs, so a metabolite written in both columns keeps only the output
+    bound. Matching that keeps a published list behaving as its authors saw
+    it. It applies to the row's own columns alone: free_inputs and
+    free_outputs are the caller saying a metabolite may flow either way, and
+    both of those survive.
+    """
+    import tempfile
+    from pathlib import Path
+
+    from cobra import Metabolite
+    from cobra import Model as CobraModel
+    from cobra import Reaction
+
+    from spectra_cobra.tasks import parse_task_list
+
+    model = CobraModel("named")
+    made = Metabolite("m", name="made", compartment="c")
+    fed = Metabolite("f", name="fed", compartment="c")
+    model.add_metabolites([made, fed])
+    convert = Reaction("R", lower_bound=0.0, upper_bound=1000.0)
+    model.add_reactions([convert])
+    convert.add_metabolites({fed: -1.0, made: 1.0})
+
+    header = (
+        "\tID\tDESCRIPTION\tSHOULD FAIL\tIN\tIN LB\tIN UB\tOUT\tOUT LB\tOUT UB"
+        "\tEQU\tEQU LB\tEQU UB\n"
+    )
+    row = "\tT\tboth ways\t\tfed[c];made[c]\t1\t1\tmade[c]\t0\t1000\t\t\t\n"
+    with tempfile.TemporaryDirectory() as folder:
+        path = Path(folder) / "tasks.txt"
+        path.write_text(header + row)
+        tasks, _ = parse_task_list(str(path), model)
+        with_free, _ = parse_task_list(str(path), model, free_inputs=("made[c]",))
+
+    assert "m" not in tasks[0].inputs, "the row's own input should be dropped"
+    assert "m" in tasks[0].outputs
+    # free_inputs is the caller's word, not the file's, so it is not dropped.
+    assert "m" in with_free[0].inputs

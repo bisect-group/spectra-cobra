@@ -397,6 +397,8 @@ def gapfill_for_tasks(
     tol: float = 1e-4,
     problem_type: str = MIN_NET_MILP,
     free_reactions: Optional[Iterable[str]] = None,
+    essential_reactions: Optional[Iterable[str]] = None,
+    core_solve: bool = True,
     repair: bool = True,
     time_limit: Optional[float] = 300.0,
     seed: Optional[int] = None,
@@ -419,6 +421,18 @@ def gapfill_for_tasks(
         The formulation (default "minNetMILP").
     free_reactions : iterable of str, optional
         Reactions beyond the draft that cost nothing to include.
+    essential_reactions : iterable of str, optional
+        The reactions essential to the tasks, if you have already computed
+        them. Finding them is the expensive part -- 394 s on Human-GEM --
+        and it depends only on the universal model and the task list, so it
+        is worth doing once and reusing.
+    core_solve : bool, optional
+        Whether to run the bulk solve that forces the essential reactions
+        in (default True). Set it False when the model handed in has
+        already been extracted with those reactions as its core, which is
+        the usual pipeline: the extraction is yours and carries your
+        evidence weights, and this is only here to repair what the core
+        could not express.
     repair : bool, optional
         Whether to follow up task by task on whatever still fails (default
         True). This is usually necessary, see the notes.
@@ -434,13 +448,33 @@ def gapfill_for_tasks(
 
     Notes
     -----
-    The tasks are turned into a core reaction set, by way of the reactions
-    each task becomes infeasible without. That is a necessary condition and
-    not a sufficient one: a task with two alternative routes has no
-    essential reactions at all, so forcing the set cannot guarantee it
-    survives. `repair` is what deals with the remainder, gap-filling each
-    still-failing task inside its own constraints, and on iJO1366 it was
-    the difference between one failing task and none.
+    There are two phases, and they can be used separately.
+
+    The first turns the tasks into a core reaction set, by way of the
+    reactions each task becomes infeasible without, and extracts around it.
+    That is a necessary condition and not a sufficient one: a task with two
+    alternative routes has no essential reactions at all, so forcing the
+    set cannot guarantee it survives. On Human-GEM 34 of 45 tasks have none,
+    and the core constraint says nothing whatever about them.
+
+    The second repairs what is left, gap-filling each still-failing task
+    inside its own constraints. On iJO1366 that was the difference between
+    one failing task and none.
+
+    If you are extracting a context-specific model yourself -- with the
+    essential reactions as the core and your own evidence as the weights --
+    then the first phase has already happened, and repeating it here would
+    both recompute the essential reactions and overrule your weights. Pass
+    ``core_solve=False`` and the already-computed ``essential_reactions``:
+
+    .. code-block:: python
+
+       core, _ = essential_reactions_for_tasks(universal, tasks)
+       extracted = spectra_me(universal, sorted(core), weights=evidence)
+       result = gapfill_for_tasks(
+           extracted, universal, tasks,
+           essential_reactions=core, core_solve=False,
+       )
 
     """
     from .formulations import min_net_milp
@@ -460,11 +494,16 @@ def gapfill_for_tasks(
             skipped[:5],
         )
 
-    core, _ = essential_reactions_for_tasks(universal, usable)
+    if essential_reactions is not None:
+        core = set(essential_reactions)
+    elif core_solve:
+        core, _ = essential_reactions_for_tasks(universal, usable)
+    else:
+        core = set()
     failed: Dict[str, str] = {}
     added: Set[str] = set()
 
-    if core:
+    if core and core_solve:
         weights = {
             rxn.id: (0.0 if rxn.id in free else 1.0) for rxn in universal.reactions
         }
