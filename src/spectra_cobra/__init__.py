@@ -55,6 +55,12 @@ from .formulations import (
     min_net_milp,
     trade_off,
 )
+from .gapfilling import (
+    DEFAULT_MIN_GROWTH,
+    GapfillResult,
+    gapfill_for_growth,
+    gapfill_for_tasks,
+)
 from .tasks import (
     MetabolicTask,
     TaskEquation,
@@ -86,6 +92,11 @@ __all__ = (
     # Verification.
     "check_extraction",
     "ExtractionReport",
+    # Gap-filling.
+    "gapfill_for_growth",
+    "gapfill_for_tasks",
+    "GapfillResult",
+    "DEFAULT_MIN_GROWTH",
     # Communities.
     "build_community_model",
     "CommunityModel",
