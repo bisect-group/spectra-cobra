@@ -25,6 +25,7 @@ large-scale. bioRxiv. https://doi.org/10.64898/2026.04.02.716249
 """
 
 from ._orientation import STOICHIOMETRY, TOPOLOGY
+from .community import CommunityModel, build_community_model
 from .consistency import (
     blocked_reaction_ids,
     consistent_reaction_ids,
@@ -85,6 +86,9 @@ __all__ = (
     # Verification.
     "check_extraction",
     "ExtractionReport",
+    # Communities.
+    "build_community_model",
+    "CommunityModel",
     # Metabolic tasks, and gap-filling towards them.
     "MetabolicTask",
     "TaskEquation",
