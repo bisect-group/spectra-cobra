@@ -20,8 +20,9 @@ between.
 """
 
 import math
+from dataclasses import dataclass
 from logging import getLogger
-from typing import TYPE_CHECKING, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Set
 
 from cobra.util.solver import linear_reaction_coefficients
 from optlang.interface import FEASIBLE, OPTIMAL, TIME_LIMIT
@@ -201,6 +202,70 @@ def _included_from_indicators(
     kept = {rxn_id for rxn_id, direction in directions.items() if direction != 0}
     kept.update(rxn_id for rxn_id, var in indicators.items() if var.primal > 0.5)
     return kept
+
+
+@dataclass(frozen=True)
+class MilpSolution:
+    """What a mixed-integer formulation found.
+
+    Parameters
+    ----------
+    included : set of str
+        The reactions the extracted model should contain.
+    selected : set of str
+        The reactions whose indicator the solver switched on. This is what
+        :func:`_add_exclusion_constraints` has to be written over, and it is
+        not always the same as `included`.
+
+    Notes
+    -----
+    The two differ because a binary at zero does not pin its flux to zero
+    exactly: :math:`v_i \\le ub_i z_i` with :math:`ub_i = 1000` still permits
+    :math:`|v_i| \\le 10^{-6}` at the solver's integrality tolerance. A
+    reaction carrying a trace flux the solution genuinely depends on can
+    therefore be reported as switched off, and dropping it breaks the chain
+    it was part of. `included` keeps anything carrying real flux whatever
+    its indicator says; `selected` reports the indicators as they stand, so
+    that an exclusion constraint forbids the assignment that actually
+    occurred.
+
+    """
+
+    included: Set[str]
+    selected: Set[str]
+
+
+def _milp_solution(
+    model: "Model",
+    directions: Dict[str, int],
+    indicators: Dict[str, "object"],
+    tol: float,
+    inclusion_cutoff: Optional[float] = None,
+) -> MilpSolution:
+    """Read a mixed-integer solution off both its indicators and its flux.
+
+    Parameters
+    ----------
+    model : cobra.Model
+        The model that was just optimized.
+    directions : dict of {str: int}
+        The oriented direction of each reaction.
+    indicators : dict of {str: optlang.Variable}
+        The binary inclusion variable of each reaction that has one.
+    tol : float
+        The flux threshold, used to derive the inclusion cutoff.
+    inclusion_cutoff : float, optional
+        The absolute flux at which a reaction counts as used.
+
+    Returns
+    -------
+    MilpSolution
+        The reactions to keep, and the ones the indicators selected.
+
+    """
+    selected = _included_from_indicators(directions, indicators)
+    carrying = _included_reactions(model, tol, inclusion_cutoff)
+    return MilpSolution(included=selected | carrying, selected=selected)
 
 
 def _free_reaction_ids(model: "Model", directions: Dict[str, int]) -> List[str]:
@@ -384,7 +449,9 @@ def min_net_milp(
     steady_state: bool = True,
     time_limit: Optional[float] = 7200.0,
     previous_solutions: Optional[List[Set[str]]] = None,
-) -> Set[str]:
+    indicator_reactions: Optional[Iterable[str]] = None,
+    inclusion_cutoff: Optional[float] = None,
+) -> MilpSolution:
     """Extract a model by minimising the weighted reaction count.
 
     Parameters
@@ -406,22 +473,51 @@ def min_net_milp(
     previous_solutions : list of set of str, optional
         Reaction sets to exclude, so that a different model is returned
         (default None).
+    indicator_reactions : iterable of str, optional
+        Restrict the binaries to these reactions; the rest stay continuous
+        and are kept whatever they do (default None, meaning every free
+        reaction gets one). Choosing a subset is what makes a selection
+        problem over a handful of reactions tractable on a large model: one
+        binary per organism in a community, say, rather than one per
+        reaction.
+    inclusion_cutoff : float, optional
+        The absolute flux at which a reaction without an indicator counts as
+        used (default ``tol * 1e-7``).
 
     Returns
     -------
-    set of str
-        The identifiers of the reactions in the extracted model.
+    MilpSolution
+        The reactions to keep, and the ones the indicators selected.
 
     Notes
     -----
-    Each free reaction gets a binary variable :math:`z_i` tied to its flux by
-    :math:`lb_i z_i \\le v_i \\le ub_i z_i`, so :math:`z_i = 0` pins the flux
-    to zero, and the objective minimises :math:`\\sum_i w_i z_i`. Unlike
-    :func:`min_net_lp` this minimises the count exactly rather than its L1
-    relaxation, but it is a MILP and so far more expensive.
+    Each reaction with an indicator gets a binary :math:`z_i` tied to its
+    flux by :math:`lb_i z_i \\le v_i \\le ub_i z_i`, so :math:`z_i = 0` pins
+    the flux to zero, and the objective minimises :math:`\\sum_i w_i z_i`.
+    Unlike :func:`min_net_lp` this minimises the count exactly rather than
+    its L1 relaxation, but it is a MILP and so far more expensive.
+
+    Reactions left without an indicator keep their own bounds and are always
+    included: nothing is deciding whether to keep them, so nothing should
+    discard them.
 
     """
     free_ids = _free_reaction_ids(model, directions)
+    if indicator_reactions is None:
+        indicator_ids = list(free_ids)
+        always_keep: Set[str] = set()
+    else:
+        wanted = set(indicator_reactions)
+        unknown = wanted - set(free_ids)
+        if unknown:
+            raise SpectraError(
+                f"indicator_reactions must be free reactions of the model, "
+                f"but {len(unknown)} are not, for example "
+                f"{sorted(unknown)[:5]}. A reaction given a direction is "
+                f"already forced in and cannot also be selected over."
+            )
+        indicator_ids = [r for r in free_ids if r in wanted]
+        always_keep = set(free_ids) - wanted
     signs = reaction_signs(model)
     prob = model.problem
 
@@ -430,7 +526,7 @@ def min_net_milp(
 
         indicators = {}
         to_add = []
-        for rxn_id in free_ids:
+        for rxn_id in indicator_ids:
             reaction = model.reactions.get_by_id(rxn_id)
             var = prob.Variable(f"spectra_z_{rxn_id}", type="binary")
             indicators[rxn_id] = var
@@ -457,13 +553,16 @@ def min_net_milp(
 
         model.objective = prob.Objective(Zero, direction="min")
         model.objective.set_linear_coefficients(
-            {indicators[r]: float(weights[r]) for r in free_ids}
+            {indicators[r]: float(weights[r]) for r in indicator_ids}
         )
         _set_time_limit(model, time_limit)
 
         model.slim_optimize()
         _check_status(model, "minNetMILP problem", milp=True)
-        return _included_from_indicators(directions, indicators)
+        solution = _milp_solution(model, directions, indicators, tol, inclusion_cutoff)
+        return MilpSolution(
+            included=solution.included | always_keep, selected=solution.selected
+        )
 
 
 def trade_off(
@@ -474,7 +573,9 @@ def trade_off(
     steady_state: bool = True,
     time_limit: Optional[float] = 7200.0,
     previous_solutions: Optional[List[Set[str]]] = None,
-) -> Set[str]:
+    indicator_reactions: Optional[Iterable[str]] = None,
+    inclusion_cutoff: Optional[float] = None,
+) -> MilpSolution:
     """Extract a model by maximising the weighted number of reactions kept.
 
     Parameters
@@ -497,11 +598,18 @@ def trade_off(
     previous_solutions : list of set of str, optional
         Reaction sets to exclude, so that a different model is returned
         (default None).
+    indicator_reactions : iterable of str, optional
+        Restrict the binaries to these reactions; the rest stay continuous
+        and are kept whatever they do (default None, meaning every free
+        reaction gets one).
+    inclusion_cutoff : float, optional
+        The absolute flux at which a reaction without an indicator counts as
+        used (default ``tol * 1e-7``).
 
     Returns
     -------
-    set of str
-        The identifiers of the reactions in the extracted model.
+    MilpSolution
+        The reactions to keep, and the ones the indicators selected.
 
     Notes
     -----
@@ -522,6 +630,20 @@ def trade_off(
 
     """
     free_ids = _free_reaction_ids(model, directions)
+    if indicator_reactions is None:
+        indicator_ids = list(free_ids)
+        always_keep: Set[str] = set()
+    else:
+        wanted = set(indicator_reactions)
+        unknown = wanted - set(free_ids)
+        if unknown:
+            raise SpectraError(
+                f"indicator_reactions must be free reactions of the model, "
+                f"but {len(unknown)} are not, for example "
+                f"{sorted(unknown)[:5]}."
+            )
+        indicator_ids = [r for r in free_ids if r in wanted]
+        always_keep = set(free_ids) - wanted
     signs = reaction_signs(model)
     prob = model.problem
 
@@ -530,7 +652,7 @@ def trade_off(
 
         indicators = {}
         to_add = []
-        for rxn_id in free_ids:
+        for rxn_id in indicator_ids:
             reaction = model.reactions.get_by_id(rxn_id)
             sign = signs[rxn_id]
             lower, upper = oriented_bounds(reaction, sign)
@@ -589,13 +711,16 @@ def trade_off(
 
         model.objective = prob.Objective(Zero, direction="max")
         model.objective.set_linear_coefficients(
-            {indicators[r]: float(weights[r]) for r in free_ids}
+            {indicators[r]: float(weights[r]) for r in indicator_ids}
         )
         _set_time_limit(model, time_limit)
 
         model.slim_optimize()
         _check_status(model, "tradeOff problem", milp=True)
-        return _included_from_indicators(directions, indicators)
+        solution = _milp_solution(model, directions, indicators, tol, inclusion_cutoff)
+        return MilpSolution(
+            included=solution.included | always_keep, selected=solution.selected
+        )
 
 
 def growth_optim(

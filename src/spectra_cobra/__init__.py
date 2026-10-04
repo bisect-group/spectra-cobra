@@ -47,7 +47,13 @@ from .extraction import (
     spectra_me,
 )
 from .flux_reducer import flux_reducer
-from .formulations import growth_optim, min_net_lp, min_net_milp, trade_off
+from .formulations import (
+    MilpSolution,
+    growth_optim,
+    min_net_lp,
+    min_net_milp,
+    trade_off,
+)
 from .tasks import (
     MetabolicTask,
     TaskEquation,
@@ -74,6 +80,7 @@ __all__ = (
     "min_net_milp",
     "trade_off",
     "growth_optim",
+    "MilpSolution",
     "flux_reducer",
     # Verification.
     "check_extraction",

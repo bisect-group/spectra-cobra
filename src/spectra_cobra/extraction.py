@@ -25,7 +25,13 @@ from ._orientation import (
     validate_consistency_type,
 )
 from .exceptions import SpectraError, SpectraSolverError
-from .formulations import growth_optim, min_net_lp, min_net_milp, trade_off
+from .formulations import (
+    MilpSolution,
+    growth_optim,
+    min_net_lp,
+    min_net_milp,
+    trade_off,
+)
 
 if TYPE_CHECKING:
     from cobra.core import Model
@@ -328,7 +334,8 @@ def _solve_formulation(
     time_limit: Optional[float],
     previous_solutions: Optional[List[Set[str]]] = None,
     inclusion_cutoff: Optional[float] = None,
-) -> Set[str]:
+    indicator_reactions: Optional[Iterable[str]] = None,
+) -> MilpSolution:
     """Dispatch to the requested network inference formulation.
 
     Parameters
@@ -353,8 +360,10 @@ def _solve_formulation(
 
     Returns
     -------
-    set of str
-        The identifiers of the reactions in the extracted model.
+    MilpSolution
+        The reactions to keep, and the ones a mixed-integer formulation's
+        indicators selected. The linear formulations have no indicators, so
+        the two are the same for them.
 
     Raises
     ------
@@ -373,14 +382,22 @@ def _solve_formulation(
             f"one of {MILP_PROBLEM_TYPES}, not {problem_type!r}."
         )
 
+    if indicator_reactions is not None and problem_type not in MILP_PROBLEM_TYPES:
+        raise SpectraError(
+            f"indicator_reactions needs a mixed-integer formulation, one of "
+            f"{MILP_PROBLEM_TYPES}, not {problem_type!r}."
+        )
+
     if problem_type == MIN_NET_LP:
-        return min_net_lp(
+        kept = min_net_lp(
             model, directions, weights, tol, steady_state, inclusion_cutoff
         )
+        return MilpSolution(included=kept, selected=kept)
     if problem_type == GROWTH_OPTIM:
-        return growth_optim(
+        kept = growth_optim(
             model, directions, weights, tol, steady_state, inclusion_cutoff
         )
+        return MilpSolution(included=kept, selected=kept)
     if problem_type == MIN_NET_MILP:
         return min_net_milp(
             model,
@@ -390,6 +407,8 @@ def _solve_formulation(
             steady_state,
             time_limit,
             previous_solutions,
+            indicator_reactions,
+            inclusion_cutoff,
         )
     return trade_off(
         model,
@@ -399,6 +418,8 @@ def _solve_formulation(
         steady_state,
         time_limit,
         previous_solutions,
+        indicator_reactions,
+        inclusion_cutoff,
     )
 
 
@@ -458,6 +479,7 @@ def spectra_me(
     previous_solutions: Optional[List[Set[str]]] = None,
     seed: Optional[int] = None,
     inclusion_cutoff: Optional[float] = None,
+    indicator_reactions: Optional[Iterable[str]] = None,
 ) -> "Model":
     """Extract a context-specific model around a set of core reactions.
 
@@ -548,6 +570,7 @@ def spectra_me(
         previous_solutions=previous_solutions,
         seed=seed,
         inclusion_cutoff=inclusion_cutoff,
+        indicator_reactions=indicator_reactions,
     )
     return models[0] if n_solutions == 1 else models
 
@@ -567,6 +590,7 @@ def _spectra_me(
     seed: Optional[int],
     blocked_ids: Optional[Set[str]] = None,
     inclusion_cutoff: Optional[float] = None,
+    indicator_reactions: Optional[Iterable[str]] = None,
 ) -> Tuple[List["Model"], List[Set[str]]]:
     """Run the extraction, returning the models and the reaction sets found.
 
@@ -643,7 +667,7 @@ def _spectra_me(
             directions = _directions_from_flux(model, fluxes or {}, core_ids, signs)
 
         try:
-            keep_ids = _solve_formulation(
+            solution = _solve_formulation(
                 model,
                 directions,
                 all_weights,
@@ -653,6 +677,7 @@ def _spectra_me(
                 time_limit,
                 exclude or None,
                 inclusion_cutoff,
+                indicator_reactions,
             )
         except SpectraSolverError:
             # Excluding every solution found so far can leave the problem with
@@ -670,11 +695,15 @@ def _spectra_me(
                 break
             raise
 
-        models.append(_extract(model, keep_ids, remove_genes))
-        found.append(keep_ids)
+        models.append(_extract(model, solution.included, remove_genes))
+        found.append(solution.included)
 
         if alt_solution_method == PATHWAY_EXCLUSION:
-            exclude.append(keep_ids)
+            # The exclusion constraint is written over the indicators, so it
+            # has to be given the reactions they actually selected. Handing
+            # it the wider kept set would let the same solution recur: the
+            # extra members sit at zero, so the sum stays under the bound.
+            exclude.append(solution.selected)
 
     return models, found
 
@@ -801,7 +830,7 @@ def spectra_ccme(
         )
 
     all_weights = _normalise_weights(model, weights)
-    keep_ids = _solve_formulation(
+    solution = _solve_formulation(
         model,
         directions,
         all_weights,
@@ -812,7 +841,7 @@ def spectra_ccme(
         None,
         inclusion_cutoff,
     )
-    first = _extract(model, keep_ids, remove_genes)
+    first = _extract(model, solution.included, remove_genes)
 
     if n_solutions == 1:
         return first, blocked_core
@@ -834,7 +863,9 @@ def spectra_ccme(
         time_limit=time_limit,
         remove_genes=remove_genes,
         previous_solutions=(
-            [keep_ids & consistent_ids]
+            # The indicator-selected set, not the wider kept set: see the
+            # note where _spectra_me builds its own exclusion list.
+            [solution.selected & consistent_ids]
             if alt_solution_method == PATHWAY_EXCLUSION
             else None
         ),

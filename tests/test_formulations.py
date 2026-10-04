@@ -55,7 +55,9 @@ def test_min_net_lp_with_no_core_keeps_nothing(toy_model: Model) -> None:
 
 def test_min_net_milp_with_no_core_keeps_nothing(toy_model: Model) -> None:
     """The MILP also settles on the empty network when nothing is forced."""
-    kept = min_net_milp(toy_model, _all_free(toy_model), _ones(toy_model), 1e-4)
+    kept = min_net_milp(
+        toy_model, _all_free(toy_model), _ones(toy_model), 1e-4
+    ).included
     assert kept == set()
 
 
@@ -72,8 +74,9 @@ def test_min_net_milp_matches_min_net_lp_here(toy_model: Model) -> None:
     directions = _all_free(toy_model)
     directions["R3"] = 1
     weights = _ones(toy_model)
-    assert min_net_lp(toy_model, directions, weights, 1e-4) == min_net_milp(
-        toy_model, directions, weights, 1e-4
+    assert (
+        min_net_lp(toy_model, directions, weights, 1e-4)
+        == min_net_milp(toy_model, directions, weights, 1e-4).included
     )
 
 
@@ -131,7 +134,7 @@ def test_trade_off_keeps_positively_weighted_reactions(toy_model: Model) -> None
     for rxn_id in ("R1", "R2", "R3", "R4", "R5"):
         weights[rxn_id] = 10.0
 
-    kept = trade_off(toy_model, _all_free(toy_model), weights, 1e-4)
+    kept = trade_off(toy_model, _all_free(toy_model), weights, 1e-4).included
     assert {"R1", "R2", "R3", "R4", "R5"} <= kept
     assert not {"R7", "R10"} & kept
 
@@ -141,7 +144,7 @@ def test_trade_off_with_all_negative_weights_keeps_nothing(
 ) -> None:
     """If every reaction is penalised, the empty network wins."""
     weights = {r.id: -1.0 for r in toy_model.reactions}
-    assert trade_off(toy_model, _all_free(toy_model), weights, 1e-4) == set()
+    assert trade_off(toy_model, _all_free(toy_model), weights, 1e-4).included == set()
 
 
 def test_min_net_lp_rejects_a_blocked_forced_reaction(
@@ -267,18 +270,41 @@ def test_inclusion_cutoff_reaches_spectra_me(toy_model: Model) -> None:
     assert {r.id for r in strict.reactions} < {r.id for r in default.reactions}
 
 
-def test_mixed_integer_formulations_ignore_the_cutoff(toy_model: Model) -> None:
-    """The MILPs read their answer off the binaries, not off the flux."""
+def test_a_milp_keeps_what_carries_flux_whatever_its_binary_says(
+    toy_model: Model,
+) -> None:
+    """A binary at zero still permits a trace flux, so flux decides too.
+
+    ``v_i <= ub_i z_i`` with a bound of 1000 leaves room for ``|v_i|`` up to
+    ``1000 * IntFeasTol`` even at ``z_i = 0``. On iJO1366 that was enough to
+    drop nineteen reactions carrying 2e-07 apiece, which the solution needed,
+    leaving an extracted model that could not grow at all. So the kept set is
+    the union of the selected binaries and whatever carries flux, while
+    ``selected`` still reports the binaries for the exclusion constraints.
+    """
     directions = _all_free(toy_model)
     directions["R3"] = 1
     weights = _ones(toy_model)
 
-    # A cutoff above every attainable flux would empty a flux-based answer.
-    assert min_net_milp(toy_model, directions, weights, 1e-4) == min_net_milp(
-        toy_model, directions, weights, 1e-4
-    )
-    kept = min_net_milp(toy_model, directions, weights, 1e-4)
-    assert "R3" in kept and len(kept) > 1
+    solution = min_net_milp(toy_model, directions, weights, 1e-4)
+
+    assert solution.selected <= solution.included
+    assert "R3" in solution.included
+
+
+def test_milp_solution_unions_the_flux_with_the_binaries(toy_model: Model) -> None:
+    """With no binaries at all, everything kept has to come from the flux."""
+    from spectra_cobra.formulations import _milp_solution
+
+    with toy_model:
+        toy_model.objective = toy_model.reactions.R5
+        toy_model.slim_optimize()
+        solution = _milp_solution(toy_model, {}, {}, 1e-4)
+        carrying = {rxn.id for rxn in toy_model.reactions if abs(rxn.flux) > 1e-9}
+
+    assert solution.selected == set(), "no indicators means nothing selected"
+    assert carrying, "the toy model should be carrying some flux here"
+    assert carrying <= solution.included
 
 
 class _StubSolver:
@@ -340,3 +366,96 @@ def test_an_lp_still_demands_optimality() -> None:
     model = _StubModel("time_limit", 90.0)
     with pytest.raises(SpectraSolverError, match="instead of reaching optimality"):
         _check_status(model, "minNetLP problem")
+
+
+def test_indicator_reactions_restricts_the_binaries(toy_model: Model) -> None:
+    """Only the named reactions get a binary; the rest stay continuous."""
+    directions = _all_free(toy_model)
+    directions["R3"] = 1
+    seen = []
+
+    original = Model.slim_optimize
+
+    def spy(self, *args, **kwargs):
+        seen.append({v.name for v in self.variables if v.name.startswith("spectra_z_")})
+        return original(self, *args, **kwargs)
+
+    Model.slim_optimize = spy
+    try:
+        min_net_milp(
+            toy_model,
+            directions,
+            _ones(toy_model),
+            1e-4,
+            indicator_reactions=["R7", "R10"],
+        )
+    finally:
+        Model.slim_optimize = original
+
+    assert seen[0] == {"spectra_z_R7", "spectra_z_R10"}
+
+
+def test_reactions_without_an_indicator_are_always_kept(toy_model: Model) -> None:
+    """Nothing is choosing over them, so nothing should discard them."""
+    directions = _all_free(toy_model)
+    directions["R3"] = 1
+
+    solution = min_net_milp(
+        toy_model,
+        directions,
+        _ones(toy_model),
+        1e-4,
+        indicator_reactions=["R7"],
+    )
+
+    # Everything free except R7 is outside the selection and so retained.
+    free_but_unselected = {
+        rxn.id for rxn in toy_model.reactions if rxn.id not in ("R3", "R7")
+    }
+    assert free_but_unselected <= solution.included
+    assert "R3" in solution.included
+
+
+def test_no_indicator_reactions_is_the_old_behaviour(toy_model: Model) -> None:
+    """Leaving it unset must select over every free reaction as before."""
+    directions = _all_free(toy_model)
+    directions["R3"] = 1
+    weights = _ones(toy_model)
+
+    everything = min_net_milp(toy_model, directions, weights, 1e-4)
+    explicit = min_net_milp(
+        toy_model,
+        directions,
+        weights,
+        1e-4,
+        indicator_reactions=[r.id for r in toy_model.reactions if r.id != "R3"],
+    )
+
+    assert everything.included == explicit.included
+
+
+def test_indicator_reactions_rejects_a_directed_reaction(toy_model: Model) -> None:
+    """A reaction already forced in cannot also be selected over."""
+    directions = _all_free(toy_model)
+    directions["R3"] = 1
+
+    with pytest.raises(SpectraError, match="must be free reactions"):
+        min_net_milp(
+            toy_model,
+            directions,
+            _ones(toy_model),
+            1e-4,
+            indicator_reactions=["R3"],
+        )
+
+
+def test_trade_off_also_takes_indicator_reactions(toy_model: Model) -> None:
+    """The option is on both mixed-integer formulations, not just one."""
+    weights = {r.id: -1.0 for r in toy_model.reactions}
+    weights["R7"] = 10.0
+
+    solution = trade_off(
+        toy_model, _all_free(toy_model), weights, 1e-4, indicator_reactions=["R7"]
+    )
+
+    assert solution.selected <= {"R7"}
