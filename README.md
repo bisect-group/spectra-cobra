@@ -9,9 +9,13 @@ SPECTRA reconstructs metabolic models from multi-omics data, extracting
 networks at a range of scales: minimal reactomes, context-specific models,
 microbial community models and multi-tissue models.
 
+Documentation: <https://spectra-cobra.readthedocs.io>
+
 ## Installation
 
 ```bash
+git clone https://github.com/bisect-group/spectra-cobra.git
+cd spectra-cobra
 pip install -e .
 ```
 
