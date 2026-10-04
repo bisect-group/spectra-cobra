@@ -113,6 +113,80 @@ it only works with `"minNetMILP"` or `"tradeOff"`. If the network runs out of
 alternatives before `n_solutions` is reached, you get the ones that exist
 rather than an error, so check `len()` on the result.
 
+## Metabolic tasks
+
+A task states something the network must be able to do: take up these
+metabolites, produce those, carry flux through this reaction.
+
+```python
+from spectra_cobra import MetabolicTask, TaskEquation, check_tasks
+
+task = MetabolicTask(
+    "atp_aerobic",
+    inputs={"glc__D_e": (0, 1000), "o2_e": (0, 1000), "pi_e": (0, 1000),
+            "h2o_e": (0, 1000), "h_e": (0, 1000)},
+    outputs={"co2_e": (0, 1000), "h2o_e": (0, 1000), "h_e": (0, 1000)},
+    equations=(TaskEquation({"atp_c": -1, "h2o_c": -1,
+                             "adp_c": 1, "pi_c": 1, "h_c": 1}, (1.0, 1000.0)),),
+)
+for result in check_tasks(model, [task]):
+    print(result.task.id, result.feasible, result.ok)
+```
+
+Bounds default to `(0, 1000)` — allowed, never required — so something needs
+a positive lower bound or the task is met by doing nothing. `parse_task_list`
+reads the published tab-separated task lists, binding them to a model by
+metabolite name and compartment.
+
+## Gap-filling
+
+`gapfill_for_growth` adds the cheapest set of universal reactions that lets a
+draft grow in each of a panel of media; `gapfill_for_tasks` does the same for
+a task list.
+
+```python
+from spectra_cobra import gapfill_for_growth
+
+M9 = {"EX_pi_e": -1000, "EX_h2o_e": -1000, "EX_h_e": -1000,
+      "EX_nh4_e": -1000, "EX_o2_e": -1000, "EX_co2_e": -1000}
+media = {c: {**M9, f"EX_{c}_e": -10.0} for c in ("glc__D", "ac", "succ")}
+
+result = gapfill_for_growth(draft, universal, media)   # min_growth=0.1
+print(result.summary(), result.added)
+```
+
+Growth is demanded through a **lower bound on the biomass reaction**, not
+through `tol`. Conflating them also demands that rate of every other core
+reaction you supply, and makes the answer move with the tolerance; with the
+bound, iJO1366 returns the same 15 reactions at every tolerance from `1e-4`
+to `1e-7`. `tradeOff` is refused here: it requires every included reaction to
+carry at least `tol`, which a growth solution cannot satisfy.
+
+For tasks, the reactions each task cannot do without become the core set.
+That is a necessary condition and not a sufficient one — a task with
+alternative routes has no essential reactions — so `gapfill_for_tasks`
+follows up task by task on whatever still fails.
+
+## Communities and minimal microbiomes
+
+`build_community_model` joins organism models into a community trading
+through a shared pool, with every reaction coupled to its organism's biomass
+so an absent organism carries no flux at all.
+
+```python
+from spectra_cobra import build_community_model, minimal_microbiome
+
+community = build_community_model([a, b, c], organisms=["A", "B", "C"])
+result = minimal_microbiome(community, products=["EX_but_u"])
+print(result.present, result.membership)
+```
+
+`minimal_microbiome` is the `minNetMILP` formulation pointed at organisms:
+each biomass reaction gets a binary through `indicator_reactions` and a
+weight of 1, everything else is weighted 0, so minimising the weighted count
+minimises the membership vector. Growth and production requirements are
+measured on the full community first, then imposed as a fraction of it.
+
 ## Steady state or accumulation
 
 Every routine takes `consistency_type`:
