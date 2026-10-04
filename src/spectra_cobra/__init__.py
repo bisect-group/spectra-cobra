@@ -61,6 +61,7 @@ from .gapfilling import (
     gapfill_for_growth,
     gapfill_for_tasks,
 )
+from .microbiome import MinimalMicrobiome, minimal_microbiome
 from .tasks import (
     MetabolicTask,
     TaskEquation,
@@ -101,6 +102,8 @@ __all__ = (
     # Communities.
     "build_community_model",
     "CommunityModel",
+    "minimal_microbiome",
+    "MinimalMicrobiome",
     # Metabolic tasks, and gap-filling towards them.
     "MetabolicTask",
     "TaskEquation",
