@@ -28,12 +28,13 @@ requiring it to carry flux.
 
 .. important::
 
-   **tol is the growth rate you are demanding.** It is the minimum flux the
-   core reaction must carry, and here the core reaction is biomass, so
-   ``tol`` is a growth rate in the model's own units. Use something
-   biologically meaningful — 0.1 h\ :sup:`-1` is a reasonable floor — and not
-   a numerical epsilon. The section at the end of this page shows what
-   happens if you forget.
+   **Demand growth with a bound, not with tol.** ``min_growth`` puts a lower
+   bound on the biomass reaction; ``tol`` stays at its usual extraction
+   value. It is tempting to make biomass the core reaction and set ``tol``
+   to the growth rate instead, and it appears to work — but ``tol`` is the
+   flux *every* core reaction must carry, so that silently demands the same
+   rate of any other core reaction you supply. The last section shows the
+   difference.
 
 A worked example
 ----------------
@@ -231,40 +232,62 @@ Use ``tradeOff`` where the requirement is a set of reactions rather than
 biomass — :doc:`gapfilling_tasks` is that case, and it works there — and
 ``minNetMILP`` whenever growth is what you are asking for.
 
-If tol is too small
--------------------
+Growth is a bound, not a tolerance
+----------------------------------
 
-The core reaction is biomass and ``tol`` is the flux it must carry, so the
-LP pins growth at exactly ``tol``. Set it to a numerical epsilon and every
-supporting flux shrinks with it, until the smallest fall below the cutoff at
-which a reaction counts as used and get dropped from the result. The chain
-they were holding up breaks.
+:func:`~spectra_cobra.gapfill_for_growth` demands growth through
+``min_growth``, a lower bound on the biomass reaction, and leaves ``tol`` at
+the value any extraction would use. The alternative — making biomass the
+core reaction and raising ``tol`` to the growth rate — looks equivalent and
+is not, for two reasons.
 
-On iJO1366 with a glucose minimal medium:
+**It spreads to every core reaction.** ``tol`` is the flux each core
+reaction must carry. Raise it to 0.1 to mean "grow at 0.1" and you have also
+demanded 0.1 through every other reaction you named as core, which is rarely
+what you meant and often infeasible.
+
+**It makes the answer move with the tolerance.** With the bound in place the
+result stops depending on ``tol`` at all. On iJO1366, across a glucose
+minimal medium:
 
 .. list-table::
    :header-rows: 1
-   :widths: 20 25 25
+   :widths: 25 25 25 25
 
    * - ``tol``
-     - Reactions extracted
-     - Growth of the result
+     - Reactions added
+     - Growth
+     - ``tol`` as the demand
    * - ``1e-4``
-     - 426
-     - **0.000000**
-   * - ``0.01``
-     - 440
+     - 15
+     - 0.683
+     - **0.000** (silently broken)
+   * - ``1e-5``
+     - 15
+     - 0.683
      - 0.623
-   * - ``0.1``
-     - 441
-     - 0.967
-   * - ``0.5``
-     - 441
-     - 0.967
+   * - ``1e-6``
+     - 15
+     - 0.683
+     - —
+   * - ``1e-7``
+     - 15
+     - 0.683
+     - —
 
-Note the trap: the broken model is the *smallest* one. Nothing errors, and a
-parsimony-minded reader sees the best-looking answer in the table. Ask for a
-growth rate you would believe, and check that the result achieves it.
+The left column is the bound doing the work: identical at every tolerance.
+The right column is what the same problem gives when ``tol`` carries the
+demand instead, and the ``1e-4`` row is the trap — the LP pins growth at
+``tol``, every supporting flux shrinks with it, the smallest fall below the
+cutoff at which a reaction counts as used, and the chains they held up
+break. Nothing errors, and the broken model is the *smaller* one.
+
+.. note::
+
+   ``min_growth`` defaults to 0.1, which is a plausible rate rather than a
+   measured one. If you have an experimental growth rate for the organism
+   and condition, pass it: the point of the default is to be a reasonable
+   demand, not to be right about your organism.
 
 Next
 ----

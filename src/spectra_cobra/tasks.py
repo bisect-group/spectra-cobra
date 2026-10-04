@@ -17,8 +17,22 @@ alternative routes has no essential reactions at all, since either route can
 be removed on its own, so forcing the essential set does not guarantee the
 task survives. It carries most of the weight cheaply; :func:`check_tasks` on
 the extracted model is what tells you whether anything is left to repair.
+
+The approach is taken from ftINIT, which computes the reactions essential to
+each task and forces them to carry flux in the extraction that follows, then
+gap-fills task by task for whatever is left over:
+
+    Gustafsson, J., Anton, M., Roshanzamir, F., Jörnsten, R., Kerkhoven,
+    E. J., Robinson, J. L., and Nielsen, J. (2023). Generation and analysis
+    of context-specific genome-scale metabolic models derived from
+    single-cell RNA-Seq data. *Proceedings of the National Academy of
+    Sciences*, 120(6), e2217868120. https://doi.org/10.1073/pnas.2217868120
+
+The task file format :func:`parse_task_list` reads, and the published task
+lists written in it, come from the same lineage by way of the RAVEN Toolbox.
 """
 
+import re
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from logging import getLogger
@@ -455,3 +469,266 @@ def essential_reactions_for_tasks(
         len(per_task),
     )
     return union, per_task
+
+
+#: How a published task file refers to a metabolite: its *name*, then its
+#: compartment in brackets, as in ``glucose[e]``.
+_REFERENCE = re.compile(r"^\s*(?P<name>.+?)\s*\[\s*(?P<compartment>[^\]]+)\s*\]\s*$")
+
+#: The arrows a task equation may be written with.
+_ARROWS = ("<=>", "=>", "-->", "<==>", "->")
+
+
+def _metabolite_index(model: "Model") -> Dict[Tuple[str, str], str]:
+    """Index a model's metabolites by (name, compartment).
+
+    Parameters
+    ----------
+    model : cobra.Model
+        The model to index.
+
+    Returns
+    -------
+    dict of {(str, str): str}
+        The identifier of each metabolite, keyed by its name and
+        compartment. Where several share both, the first is kept.
+
+    """
+    index: Dict[Tuple[str, str], str] = {}
+    for metabolite in model.metabolites:
+        key = (metabolite.name, metabolite.compartment)
+        index.setdefault(key, metabolite.id)
+        # Published lists are not always careful about case.
+        index.setdefault(
+            (metabolite.name.lower(), metabolite.compartment), metabolite.id
+        )
+    return index
+
+
+def _resolve_reference(
+    reference: str, index: Dict[Tuple[str, str], str]
+) -> Optional[str]:
+    """Return the identifier a ``name[compartment]`` reference points to.
+
+    Parameters
+    ----------
+    reference : str
+        The reference, as written in the task file.
+    index : dict of {(str, str): str}
+        The index from :func:`_metabolite_index`.
+
+    Returns
+    -------
+    str or None
+        The metabolite identifier, or None if it is not in the model.
+
+    """
+    match = _REFERENCE.match(reference)
+    if match is None:
+        return None
+    name = match.group("name")
+    compartment = match.group("compartment")
+    return index.get((name, compartment)) or index.get((name.lower(), compartment))
+
+
+def _parse_equation(
+    equation: str, index: Dict[Tuple[str, str], str]
+) -> Tuple[Dict[str, float], List[str]]:
+    """Turn a task equation into stoichiometry.
+
+    Parameters
+    ----------
+    equation : str
+        The equation, such as ``ATP[c] + H2O[c] => ADP[c] + Pi[c]``.
+    index : dict of {(str, str): str}
+        The metabolite index.
+
+    Returns
+    -------
+    tuple of (dict of {str: float}, list of str)
+        The stoichiometry, and the references that could not be resolved.
+
+    """
+    arrow = next((a for a in _ARROWS if a in equation), None)
+    if arrow is None:
+        return {}, [equation]
+    left, right = equation.split(arrow, 1)
+    stoichiometry: Dict[str, float] = {}
+    unresolved: List[str] = []
+    for side, sign in ((left, -1.0), (right, 1.0)):
+        # Split on " + ", not on "+": the published lists write the proton
+        # as "H+[c]", and a bare split shears it into "H" and "[c]".
+        for term in re.split(r"\s\+\s", side):
+            term = term.strip()
+            if not term:
+                continue
+            coefficient, _, remainder = term.partition(" ")
+            try:
+                factor = float(coefficient)
+                reference = remainder.strip()
+            except ValueError:
+                factor = 1.0
+                reference = term
+            met_id = _resolve_reference(reference, index)
+            if met_id is None:
+                unresolved.append(reference)
+                continue
+            stoichiometry[met_id] = stoichiometry.get(met_id, 0.0) + sign * factor
+    return stoichiometry, unresolved
+
+
+def _bounds(row: Dict[str, str], prefix: str, default: Tuple[float, float]):
+    """Read a row's lower and upper bound for a column group.
+
+    Parameters
+    ----------
+    row : dict of {str: str}
+        The task row.
+    prefix : str
+        The column prefix, ``"IN"``, ``"OUT"`` or ``"EQU"``.
+    default : tuple of (float, float)
+        What to use where the row is blank.
+
+    Returns
+    -------
+    tuple of (float, float)
+        The bounds.
+
+    """
+    lower, upper = default
+    raw_lower = (row.get(f"{prefix} LB") or "").strip()
+    raw_upper = (row.get(f"{prefix} UB") or "").strip()
+    if raw_lower:
+        lower = float(raw_lower)
+    if raw_upper:
+        upper = float(raw_upper)
+    return lower, upper
+
+
+def parse_task_list(
+    path: str,
+    model: "Model",
+    skip_unresolved: bool = True,
+    free_outputs: Iterable[str] = (),
+) -> Tuple[List[MetabolicTask], Dict[str, List[str]]]:
+    """Read a published task list and bind it to a model.
+
+    Parameters
+    ----------
+    path : str
+        The tab-separated task file. The columns follow the convention of
+        the published lists: ``ID``, ``DESCRIPTION``, ``SHOULD FAIL``,
+        ``IN``, ``IN LB``, ``IN UB``, ``OUT``, ``OUT LB``, ``OUT UB``,
+        ``EQU``, ``EQU LB``, ``EQU UB``, with metabolites written as
+        ``name[compartment]`` and several separated by semicolons.
+    model : cobra.Model
+        The model the names are resolved against, by metabolite name and
+        compartment rather than by identifier.
+    skip_unresolved : bool, optional
+        Whether to drop tasks naming metabolites the model does not have
+        (default True). They can never be performed, so keeping them only
+        produces failures that no gap-fill could repair.
+    free_outputs : iterable of str, optional
+        References, written as ``name[compartment]``, that every task may
+        produce whether or not it lists them (default none). Published
+        lists are often written against a convention where common waste can
+        always leave, and omit it; see the notes.
+
+    Returns
+    -------
+    tuple of (list of MetabolicTask, dict of {str: list of str})
+        The tasks, and the references that could not be resolved, keyed by
+        task identifier.
+
+    Notes
+    -----
+    Published lists refer to metabolites by name, not by identifier, which
+    is what makes one list usable across models that number their
+    metabolites differently. It also makes the binding approximate: a name
+    that does not appear verbatim in the model will not resolve, and the
+    second return value is there so that is visible rather than silent.
+
+    `free_outputs` exists because the lists are not self-contained. A task
+    reading "produce 3-phospho-D-glycerate from glucose, oxygen and
+    phosphate" lists the product and nothing else, but making it also makes
+    water and protons, and with nowhere for those to go the task is
+    infeasible as written. On Human-GEM, 30 of 56 published essential tasks
+    fail for exactly that reason and pass once ``H2O``, ``CO2`` and ``H+``
+    are allowed out. Which metabolites a list assumes is a property of the
+    list, so it is asked for rather than guessed.
+
+    """
+    import csv
+
+    index = _metabolite_index(model)
+    tasks: List[MetabolicTask] = []
+    unresolved: Dict[str, List[str]] = {}
+    seen: Dict[str, int] = {}
+
+    with open(path, newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle, delimiter="\t"):
+            identifier = (row.get("ID") or "").strip()
+            description = (row.get("DESCRIPTION") or "").strip()
+            if not identifier or identifier.startswith("#") or not description:
+                continue
+            # The published lists reuse a category as the ID, so make it unique.
+            seen[identifier] = seen.get(identifier, 0) + 1
+            task_id = f"{identifier}_{seen[identifier]:03d}"
+
+            missing: List[str] = []
+            inputs, outputs = {}, {}
+            for column, target, default in (
+                ("IN", inputs, DEFAULT_BOUNDS),
+                ("OUT", outputs, DEFAULT_BOUNDS),
+            ):
+                bounds = _bounds(row, column, default)
+                for reference in (row.get(column) or "").split(";"):
+                    reference = reference.strip()
+                    if not reference:
+                        continue
+                    met_id = _resolve_reference(reference, index)
+                    if met_id is None:
+                        missing.append(reference)
+                        continue
+                    target[met_id] = bounds
+
+            for reference in free_outputs:
+                met_id = _resolve_reference(reference, index)
+                if met_id is None:
+                    missing.append(reference)
+                elif met_id not in outputs:
+                    outputs[met_id] = DEFAULT_BOUNDS
+
+            equations = []
+            equ_bounds = _bounds(row, "EQU", DEFAULT_EQUATION_BOUNDS)
+            for raw in (row.get("EQU") or "").split(";"):
+                raw = raw.strip()
+                if not raw:
+                    continue
+                stoichiometry, bad = _parse_equation(raw, index)
+                missing.extend(bad)
+                if stoichiometry:
+                    equations.append(TaskEquation(stoichiometry, equ_bounds))
+
+            if missing:
+                unresolved[task_id] = missing
+                if skip_unresolved:
+                    continue
+
+            tasks.append(
+                MetabolicTask(
+                    id=task_id,
+                    description=description,
+                    inputs=inputs,
+                    outputs=outputs,
+                    equations=tuple(equations),
+                    should_fail=bool((row.get("SHOULD FAIL") or "").strip()),
+                )
+            )
+
+    logger.info(
+        "parsed %d tasks; %d named metabolites the model does not have",
+        len(tasks),
+        len(unresolved),
+    )
+    return tasks, unresolved

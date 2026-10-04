@@ -69,6 +69,7 @@ from .tasks import (
     check_tasks,
     essential_reactions_for_task,
     essential_reactions_for_tasks,
+    parse_task_list,
 )
 from .verification import ExtractionReport, check_extraction
 
@@ -108,6 +109,7 @@ __all__ = (
     "check_tasks",
     "essential_reactions_for_task",
     "essential_reactions_for_tasks",
+    "parse_task_list",
     # Option names.
     "STOICHIOMETRY",
     "TOPOLOGY",

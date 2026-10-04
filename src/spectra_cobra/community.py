@@ -12,6 +12,14 @@ not merely not growing, so every reaction is coupled to its own biomass: no
 biomass flux, no flux anywhere in that organism. And the environment must be
 reachable only through the shared pool, so the organisms' own exchange
 reactions are replaced rather than kept alongside.
+
+The compartmentalised layout and the biomass coupling follow the joint FBA
+formulation used for minimal microbiomes:
+
+    Raghu, A. K., Palanikumar, I., and Raman, K. (2024). Designing
+    function-specific minimal microbiomes from large microbial communities.
+    *npj Systems Biology and Applications*, 10, 46.
+    https://doi.org/10.1038/s41540-024-00373-1
 """
 
 from dataclasses import dataclass, field
