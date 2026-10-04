@@ -238,3 +238,80 @@ def test_check_tasks_reports_each_in_order(task_model: Model) -> None:
 
     assert [r.task.id for r in results] == ["atp", "control"]
     assert all(r.ok for r in results)
+
+
+def test_free_inputs_and_outputs_loosen_every_task(task_model: Model) -> None:
+    """Published lists omit what they take for granted, so it can be supplied.
+
+    A task is written against a convention: common waste can leave, oxygen
+    is available. Where the convention is not written down, the task is
+    infeasible as read, and these two options are how the caller restores
+    it.
+    """
+    import tempfile
+    from pathlib import Path
+
+    from cobra import Metabolite
+    from cobra import Model as CobraModel
+    from cobra import Reaction
+
+    from spectra_cobra.tasks import parse_task_list
+
+    # The parser resolves by metabolite *name* and compartment, so the model
+    # it binds to has to carry both.
+    named = CobraModel("named")
+    substrate = Metabolite("s", name="substrate", compartment="e")
+    waste = Metabolite("w", name="waste", compartment="c")
+    named.add_metabolites([substrate, waste])
+    convert = Reaction("CONV", lower_bound=0.0, upper_bound=1000.0)
+    named.add_reactions([convert])
+    convert.add_metabolites({substrate: -1.0, waste: 1.0})
+    named.solver = task_model.solver.interface.__name__.rsplit(".", 1)[-1]
+
+    header = (
+        "\tID\tDESCRIPTION\tSHOULD FAIL\tIN\tIN LB\tIN UB\tOUT\tOUT LB\tOUT UB"
+        "\tEQU\tEQU LB\tEQU UB\n"
+    )
+    # Consume the substrate; the waste it makes is deliberately not listed.
+    row = "\tT\tconsume the substrate\t\tsubstrate[e]\t1\t1\t\t\t\t\t\t\n"
+    with tempfile.TemporaryDirectory() as folder:
+        path = Path(folder) / "tasks.txt"
+        path.write_text(header + row)
+
+        bare, _ = parse_task_list(str(path), named)
+        loosened, _ = parse_task_list(str(path), named, free_outputs=("waste[c]",))
+
+    assert bare and loosened
+    # Consuming the substrate makes waste, and the row gives it nowhere to go.
+    assert not check_task(named, bare[0]).feasible
+    assert check_task(named, loosened[0]).feasible
+
+
+def test_an_equation_keeps_the_proton_together(task_model: Model) -> None:
+    """Terms split on " + ", so "H+[c]" must survive as one reference.
+
+    Splitting on a bare "+" shears the proton into "H" and "[c]", which cost
+    26 of the 69 rows of the Human-GEM list before it was fixed.
+    """
+    from cobra import Metabolite
+    from cobra import Model as CobraModel
+
+    from spectra_cobra.tasks import _metabolite_index, _parse_equation
+
+    model = CobraModel("protons")
+    model.add_metabolites(
+        [
+            Metabolite("atp", name="ATP", compartment="c"),
+            Metabolite("h2o", name="H2O", compartment="c"),
+            Metabolite("adp", name="ADP", compartment="c"),
+            Metabolite("h", name="H+", compartment="c"),
+        ]
+    )
+    index = _metabolite_index(model)
+
+    stoichiometry, unresolved = _parse_equation(
+        "ATP[c] + H2O[c] => ADP[c] + H+[c]", index
+    )
+
+    assert unresolved == [], f"the proton was sheared apart: {unresolved}"
+    assert stoichiometry == {"atp": -1.0, "h2o": -1.0, "adp": 1.0, "h": 1.0}

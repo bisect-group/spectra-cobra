@@ -610,6 +610,7 @@ def parse_task_list(
     model: "Model",
     skip_unresolved: bool = True,
     free_outputs: Iterable[str] = (),
+    free_inputs: Iterable[str] = (),
 ) -> Tuple[List[MetabolicTask], Dict[str, List[str]]]:
     """Read a published task list and bind it to a model.
 
@@ -633,6 +634,10 @@ def parse_task_list(
         produce whether or not it lists them (default none). Published
         lists are often written against a convention where common waste can
         always leave, and omit it; see the notes.
+    free_inputs : iterable of str, optional
+        References that every task may take up whether or not it lists them
+        (default none). The same omission happens on the input side, most
+        often with oxygen.
 
     Returns
     -------
@@ -648,14 +653,27 @@ def parse_task_list(
     that does not appear verbatim in the model will not resolve, and the
     second return value is there so that is visible rather than silent.
 
-    `free_outputs` exists because the lists are not self-contained. A task
-    reading "produce 3-phospho-D-glycerate from glucose, oxygen and
-    phosphate" lists the product and nothing else, but making it also makes
-    water and protons, and with nowhere for those to go the task is
-    infeasible as written. On Human-GEM, 30 of 56 published essential tasks
-    fail for exactly that reason and pass once ``H2O``, ``CO2`` and ``H+``
-    are allowed out. Which metabolites a list assumes is a property of the
-    list, so it is asked for rather than guessed.
+    `free_outputs` and `free_inputs` exist because the lists are not
+    self-contained. A task reading "produce 3-phospho-D-glycerate from
+    glucose, oxygen and phosphate" lists the product and nothing else, but
+    making it also makes water and protons, and with nowhere for those to go
+    the task is infeasible as written. "Beta oxidation of saturated fatty
+    acid" has the mirror problem: it lists stearate going in and water and
+    CO2 coming out, but not the oxygen without which the NADH cannot be
+    reoxidised.
+
+    On Human-GEM both show up. Of 56 published essential tasks, 26 pass as
+    literally written, 45 once ``H2O``, ``CO2`` and ``H+`` may leave, and 55
+    once ``O2`` may also enter. Which metabolites a list takes for granted
+    is a property of the list, so it is asked for rather than guessed.
+
+    .. warning::
+
+       Both options loosen every task, and a loose enough task passes for
+       the wrong reason. Check them against the list's ``should_fail``
+       controls. The Human-GEM essential list has none, so the numbers above
+       are evidence that the tasks become satisfiable, not that they became
+       satisfiable honestly.
 
     """
     import csv
@@ -691,6 +709,13 @@ def parse_task_list(
                         missing.append(reference)
                         continue
                     target[met_id] = bounds
+
+            for reference in free_inputs:
+                met_id = _resolve_reference(reference, index)
+                if met_id is None:
+                    missing.append(reference)
+                elif met_id not in inputs:
+                    inputs[met_id] = DEFAULT_BOUNDS
 
             for reference in free_outputs:
                 met_id = _resolve_reference(reference, index)
