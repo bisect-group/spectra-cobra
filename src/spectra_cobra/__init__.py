@@ -48,6 +48,15 @@ from .extraction import (
 )
 from .flux_reducer import flux_reducer
 from .formulations import growth_optim, min_net_lp, min_net_milp, trade_off
+from .tasks import (
+    MetabolicTask,
+    TaskEquation,
+    TaskResult,
+    check_task,
+    check_tasks,
+    essential_reactions_for_task,
+    essential_reactions_for_tasks,
+)
 from .verification import ExtractionReport, check_extraction
 
 __version__ = "0.1.0.dev0"
@@ -69,6 +78,14 @@ __all__ = (
     # Verification.
     "check_extraction",
     "ExtractionReport",
+    # Metabolic tasks, and gap-filling towards them.
+    "MetabolicTask",
+    "TaskEquation",
+    "TaskResult",
+    "check_task",
+    "check_tasks",
+    "essential_reactions_for_task",
+    "essential_reactions_for_tasks",
     # Option names.
     "STOICHIOMETRY",
     "TOPOLOGY",

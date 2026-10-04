@@ -56,7 +56,9 @@ target-version = ["py39"]
 [tool.isort]
 profile = "black"
 line_length = 88
-lines_after_imports = 2
+# lines_after_imports is deliberately left at isort's default. Pinning it to
+# 2 made isort and black disagree about the blank lines before a comment that
+# follows the imports, and black wins, so `isort --check` could never pass.
 known_first_party = ["spectra_cobra"]
 
 [tool.pytest.ini_options]

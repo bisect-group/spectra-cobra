@@ -49,6 +49,9 @@ What is in the package
      - Finds a sparse flux distribution
    * - :doc:`functions/verification`
      - Checks an extracted model is consistent and complete
+   * - :doc:`functions/tasks`
+     - States what a network must be able to do, and finds the reactions
+       it cannot do it without
 
 Which function do I want?
 -------------------------
@@ -60,6 +63,9 @@ Which function do I want?
 * To build one and you are not sure the universal model is consistent, use
   :doc:`functions/spectra_ccme`. It reports the core reactions it had to drop
   instead of failing.
+* To fill the gaps in a draft reconstruction, so that it can perform a list
+  of metabolic tasks or grow in a panel of media, see
+  :doc:`tutorials/gapfilling_tasks` and :doc:`tutorials/gapfilling_media`.
 
 Citation
 --------
@@ -84,6 +90,7 @@ Citation
    functions/formulations
    functions/flux_reducer
    functions/verification
+   functions/tasks
 
 .. toctree::
    :maxdepth: 2
@@ -94,6 +101,8 @@ Citation
    tutorials/formulations
    tutorials/alternative_solutions
    tutorials/topology
+   tutorials/gapfilling_tasks
+   tutorials/gapfilling_media
    tutorials/recon3d
 
 .. toctree::
