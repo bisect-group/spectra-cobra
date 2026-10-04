@@ -52,6 +52,10 @@ What is in the package
    * - :doc:`functions/tasks`
      - States what a network must be able to do, and finds the reactions
        it cannot do it without
+   * - :doc:`functions/gapfilling`
+     - Fills the gaps in a draft, towards growth or towards tasks
+   * - :doc:`functions/community`
+     - Joins organism models, and reduces a community to a minimal one
 
 Which function do I want?
 -------------------------
@@ -91,6 +95,8 @@ Citation
    functions/flux_reducer
    functions/verification
    functions/tasks
+   functions/gapfilling
+   functions/community
 
 .. toctree::
    :maxdepth: 2
