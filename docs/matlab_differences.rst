@@ -1,9 +1,9 @@
 Differences from the MATLAB implementation
 ==========================================
 
-The optimisation problems are ported as written. The machinery around them is
-rebuilt on cobrapy's solver interface rather than on raw matrices, and a few
-behaviours are deliberately different.
+The optimisation problems are the same in both implementations. The machinery
+around them is built on cobrapy's solver interface rather than on raw
+matrices, and a few behaviours are deliberately different.
 
 Nothing mutates your model
 --------------------------

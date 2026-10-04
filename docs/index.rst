@@ -4,12 +4,15 @@ SPECTRA for cobrapy
 **S**\ calable **P**\ latform for **E**\ xtracting **C**\ onstraint-based
 **T**\ op-down **R**\ econstructions and **A**\ nalysis.
 
-``spectra-cobra`` reconstructs metabolic models from multi-omics data. It is a
-Python port of the `SPECTRA <https://github.com/bisect-group/spectra>`_ MATLAB
-package, built on `cobrapy <https://github.com/opencobra/cobrapy>`_ rather than
-the COBRA Toolbox, and it extracts networks at a range of scales: minimal
-reactomes, context-specific models, microbial community models and
-multi-tissue models.
+``spectra-cobra`` reconstructs metabolic networks from multi-omics data at a
+range of biological scales: minimal reactomes, context-specific models,
+gap-filled reconstructions, minimal microbiomes, microbial community models
+and multi-tissue models. What changes between them is the universal model,
+the evidence supplied and the objective chosen, not the routine called. It is
+built on `cobrapy <https://github.com/opencobra/cobrapy>`_.
+
+A `MATLAB implementation <https://github.com/NiravBhattLab/SPECTRA>`_ is also
+available; see :doc:`matlab_differences` if you are moving between the two.
 
 At a glance
 -----------
