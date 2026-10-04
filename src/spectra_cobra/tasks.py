@@ -715,25 +715,29 @@ def parse_task_list(
                         continue
                     target[met_id] = bounds
 
-            # The file has one bound column per direction, so a metabolite
-            # written in both IN and OUT has two readings and no way to say
-            # which was meant. RAVEN assigns its metabolite bounds for the
-            # inputs and then for the outputs, so the output wins; matching
-            # that keeps a published list behaving as its authors saw it.
-            # This is applied to the row's own columns only -- free_inputs
-            # and free_outputs below are the caller saying a metabolite may
-            # flow either way, and both of those are honoured.
-            shadowed = sorted(set(inputs) & set(outputs))
-            if shadowed:
-                logger.info(
-                    "task %s: %d metabolite(s) are written as both input and "
-                    "output; taking the output, as the format's readers do: %s",
-                    task_id,
-                    len(shadowed),
-                    shadowed[:5],
-                )
-                for met_id in shadowed:
+            # A metabolite written in both IN and OUT has two readings of
+            # its bounds. The rule here is the one the published format's
+            # readers use: the output's upper bound always wins, the
+            # output's lower bound wins only when it is positive, and the
+            # input's lower bound is discarded either way. So an output
+            # that merely permits production leaves the input's allowance
+            # to consume intact, and the metabolite may still flow both
+            # ways; an output that *requires* production replaces it.
+            # Requiring both at once is contradictory and is an error.
+            for met_id in sorted(set(inputs) & set(outputs)):
+                in_lower, in_upper = inputs[met_id]
+                out_lower, out_upper = outputs[met_id]
+                if in_lower > 0 and out_lower > 0:
+                    raise SpectraError(
+                        f"Task {task_id!r} requires {met_id!r} to be both "
+                        f"taken up at {in_lower:g} or more and produced at "
+                        f"{out_lower:g} or more, which cannot both hold."
+                    )
+                if out_lower > 0:
                     del inputs[met_id]
+                else:
+                    # Keep the allowance to consume, drop the requirement.
+                    inputs[met_id] = (0.0, in_upper)
 
             for reference in free_inputs:
                 met_id = _resolve_reference(reference, index)

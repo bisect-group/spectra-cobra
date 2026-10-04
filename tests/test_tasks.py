@@ -377,15 +377,15 @@ def test_a_metabolite_in_both_lists_may_flow_either_way(solver: str) -> None:
     assert len(both) == len(output_only) + 1
 
 
-def test_the_parser_takes_the_output_when_a_row_says_both(task_model: Model) -> None:
-    """The file format cannot express "either way", so the output wins.
+def test_the_parser_resolves_a_row_that_says_both(task_model: Model) -> None:
+    """A metabolite in both columns follows the published format's rule.
 
-    RAVEN assigns its metabolite bounds for the inputs and then for the
-    outputs, so a metabolite written in both columns keeps only the output
-    bound. Matching that keeps a published list behaving as its authors saw
-    it. It applies to the row's own columns alone: free_inputs and
-    free_outputs are the caller saying a metabolite may flow either way, and
-    both of those survive.
+    The output's upper bound always wins and the input's lower bound is
+    discarded, but the output's lower bound wins only when it is positive.
+    So an output that merely *permits* production leaves the input's
+    allowance to consume intact and the metabolite may still flow either
+    way; an output that *requires* production replaces the input outright.
+    Requiring both at once is contradictory and raises.
     """
     import tempfile
     from pathlib import Path
@@ -408,14 +408,29 @@ def test_the_parser_takes_the_output_when_a_row_says_both(task_model: Model) -> 
         "\tID\tDESCRIPTION\tSHOULD FAIL\tIN\tIN LB\tIN UB\tOUT\tOUT LB\tOUT UB"
         "\tEQU\tEQU LB\tEQU UB\n"
     )
-    row = "\tT\tboth ways\t\tfed[c];made[c]\t1\t1\tmade[c]\t0\t1000\t\t\t\n"
-    with tempfile.TemporaryDirectory() as folder:
-        path = Path(folder) / "tasks.txt"
-        path.write_text(header + row)
-        tasks, _ = parse_task_list(str(path), model)
-        with_free, _ = parse_task_list(str(path), model, free_inputs=("made[c]",))
+    # OUT LB = 0, so the output only permits production: the input's
+    # allowance to consume up to 1 survives, its requirement does not.
+    permits = "\tT\tboth ways\t\tfed[c];made[c]\t1\t1\tmade[c]\t0\t1000\t\t\t\n"
+    # OUT LB = 5, so the output requires production and replaces the input.
+    requires = "\tT\tboth ways\t\tfed[c];made[c]\t0\t1\tmade[c]\t5\t1000\t\t\t\n"
+    # Both lower bounds positive is contradictory.
+    clashes = "\tT\tboth ways\t\tfed[c];made[c]\t1\t1\tmade[c]\t5\t1000\t\t\t\n"
 
-    assert "m" not in tasks[0].inputs, "the row's own input should be dropped"
-    assert "m" in tasks[0].outputs
-    # free_inputs is the caller's word, not the file's, so it is not dropped.
-    assert "m" in with_free[0].inputs
+    def parsed(row, **kwargs):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "tasks.txt"
+            path.write_text(header + row)
+            return parse_task_list(str(path), model, **kwargs)[0]
+
+    permitting = parsed(permits)[0]
+    assert permitting.inputs["m"] == (0.0, 1.0), "the allowance should survive"
+    assert permitting.outputs["m"] == (0.0, 1000.0)
+
+    requiring = parsed(requires)[0]
+    assert "m" not in requiring.inputs, "a required output replaces the input"
+
+    with pytest.raises(SpectraError, match="cannot both hold"):
+        parsed(clashes)
+
+    # free_inputs is the caller's word, not the file's, so it is untouched.
+    assert "m" in parsed(requires, free_inputs=("made[c]",))[0].inputs
