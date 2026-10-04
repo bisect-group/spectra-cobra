@@ -64,10 +64,8 @@ earlier answers are ruled out.
       asked for 50, got 50
 
    The textbook model has far more than fifty ways to support ``PGI``, so
-   that one does not run out. A small network does: on SPECTRA's own
-   three-pathway toy model, asking for five returns exactly the three routes
-   that exist. This matches MATLAB, whose ``spectraME`` breaks out of its
-   loop on the same condition.
+   that one does not run out. A small network does: on the three-pathway toy
+   model, asking for five returns exactly the three routes that exist.
 
 Excluding solutions you already have
 ------------------------------------

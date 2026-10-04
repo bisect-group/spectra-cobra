@@ -42,16 +42,15 @@ if TYPE_CHECKING:
 
 logger = getLogger(__name__)
 
-#: Statuses a MILP may stop at and still carry a usable solution. The MATLAB
-#: implementation accepts ``stat == 1 || stat == 3``, i.e. optimal or a
-#: feasible solution found before the time limit. ``TIME_LIMIT`` belongs here
-#: because that is what Gurobi reports when it stops at `time_limit` holding
-#: an incumbent, which is the whole point of setting a limit; it can also be
-#: reported with no solution at all, so :func:`_has_solution` checks.
+#: Statuses a MILP may stop at and still carry a usable solution: optimal,
+#: or a feasible solution found before the time limit. ``TIME_LIMIT`` belongs
+#: here because that is what Gurobi reports when it stops at `time_limit`
+#: holding an incumbent, which is the whole point of setting a limit; it can
+#: also be reported with no solution at all, so :func:`_has_solution` checks.
 ACCEPTABLE_MILP_STATUSES = (OPTIMAL, FEASIBLE, TIME_LIMIT)
 
 #: The fraction of `tol` below which a flux counts as zero when reading the
-#: extracted reaction set off a solution, matching ``tol * 1e-7`` in MATLAB.
+#: extracted reaction set off a solution.
 INCLUSION_CUTOFF_FACTOR = 1e-7
 
 
@@ -146,7 +145,7 @@ def _included_reactions(
         The flux threshold the formulation was given.
     inclusion_cutoff : float, optional
         The absolute flux at which a reaction counts as part of the model
-        (default ``tol * 1e-7``, as in MATLAB).
+        (default ``tol * 1e-7``).
 
     Returns
     -------
@@ -292,10 +291,9 @@ def _add_exclusion_constraints(
 
     Notes
     -----
-    This ports the ``prevSols`` block shared by ``minNet.m`` and
-    ``tradeOff.m``: for each previous solution, ``sum(z_i) <= |S| - 1`` over
-    the free reactions it contained, which rules out that exact set while
-    allowing any subset or superset.
+    For each previous solution, ``sum(z_i) <= |S| - 1`` over the free
+    reactions it contained, which rules out that exact set while allowing any
+    subset or superset.
 
     """
     if not previous_solutions:
@@ -354,7 +352,7 @@ def min_net_lp(
 
     Notes
     -----
-    This is the ``minNetLP`` branch of ``minNet.m``: a single LP minimising
+    A single LP minimising
     :math:`\\sum_i w_i t_i` subject to :math:`t_i \\ge |v_i|`, so it is an
     L1 relaxation of minimising the reaction count. Being a pure LP it is the
     cheapest formulation, at the cost of favouring many small fluxes over few
@@ -416,8 +414,7 @@ def min_net_milp(
 
     Notes
     -----
-    This is the ``minNetMILP`` branch of ``minNet.m``. Each free reaction gets
-    a binary variable :math:`z_i` tied to its flux by
+    Each free reaction gets a binary variable :math:`z_i` tied to its flux by
     :math:`lb_i z_i \\le v_i \\le ub_i z_i`, so :math:`z_i = 0` pins the flux
     to zero, and the objective minimises :math:`\\sum_i w_i z_i`. Unlike
     :func:`min_net_lp` this minimises the count exactly rather than its L1
@@ -508,7 +505,7 @@ def trade_off(
 
     Notes
     -----
-    This ports ``tradeOff.m``. A free irreversible reaction gets one binary
+    A free irreversible reaction gets one binary
     :math:`z_i` with :math:`\\varepsilon z_i \\le \\hat v_i \\le ub_i z_i`,
     where :math:`\\hat v` is the oriented flux, so being included means
     carrying at least :math:`\\varepsilon`. A free *reversible* reaction gets
@@ -644,7 +641,7 @@ def growth_optim(
 
     Notes
     -----
-    This ports ``growthOptim.m``, which maximises
+    Maximises
     :math:`\\sum_{i \\in c} w_i v_i - \\sum_{i \\notin c} w_i t_i` with
     :math:`t_i \\ge |v_i|`, where :math:`c` are the objective reactions. Note
     that the reward on the objective reactions is their *weight*, not their

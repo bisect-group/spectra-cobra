@@ -170,8 +170,8 @@ model with no objective raises :class:`~spectra_cobra.SpectraError`.
 
       assert extracted.slim_optimize() > 0, "growthOptim produced a dead model"
 
-   MATLAB's example sets this weight to 10, which works there only because its
-   toy model carries fluxes of order one.
+   A weight of 10 would also do here, but only because this toy model
+   carries fluxes of order one; scale it to your own model's fluxes.
 
 Which one should I use?
 -----------------------
@@ -183,14 +183,6 @@ Which one should I use?
 * **Use ``tradeOff``** when you have signed evidence. Do not use it with
   default weights.
 * **Use ``growthOptim``** when the extracted model has to grow.
-
-A note on minNetDC
-------------------
-
-MATLAB offers a third route to the minimum-count objective, ``minNetDC``,
-which delegates to the COBRA Toolbox's ``optimizeCardinality``. This package
-does not provide it: cobrapy has no equivalent, and ``minNetMILP`` targets the
-same objective and solves it exactly.
 
 Next
 ----

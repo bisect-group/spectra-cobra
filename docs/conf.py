@@ -24,7 +24,11 @@ extensions = [
     "sphinx.ext.intersphinx",
     "sphinx.ext.mathjax",
     "sphinx.ext.viewcode",
+    "sphinx.ext.graphviz",
 ]
+
+# Graphviz: SVG keeps the network diagrams sharp at any zoom.
+graphviz_output_format = "svg"
 
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]

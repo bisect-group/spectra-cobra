@@ -1,18 +1,11 @@
 """Shared machinery for orienting reactions and relaxing the mass balance.
 
-The MATLAB implementation of SPECTRA starts every routine by negating the
-stoichiometric columns of reactions that can only carry negative flux, and by
-swapping and negating their bounds::
-
-    IrR = model.ub <= 0;
-    model.S(:, IrR) = -model.S(:, IrR);
-    model.ub(IrR) = -model.lb(IrR);
-    model.lb(IrR) = -temp;
-
-That rewrite exists so the rest of the algorithm has a canonical "try this way
-first" direction for every reaction. Mutating a :class:`cobra.Model` that way
-would be both expensive and surprising, so this module expresses the same thing
-as a per-reaction sign applied to the reaction's flux expression. A reaction's
+Every routine needs a canonical "try this way first" direction for each
+reaction, which classically is arranged by negating the stoichiometric
+columns of reactions that can only carry negative flux and swapping their
+bounds. Mutating a :class:`cobra.Model` that way would be both expensive and
+surprising, so this module expresses the same thing as a per-reaction sign
+applied to the reaction's flux expression. A reaction's
 *oriented* flux is ``sign * flux``, and the two formulations are equivalent
 because negating a column and negating its variable cancel out:
 
@@ -49,9 +42,9 @@ def reaction_sign(reaction: "Reaction") -> float:
     Returns
     -------
     float
-        -1.0 if the reaction can only carry negative flux, 1.0 otherwise. This
-        mirrors the ``model.ub <= 0`` test the MATLAB implementation uses to
-        pick the columns it negates.
+        -1.0 if the reaction can only carry negative flux, 1.0 otherwise,
+        i.e. the sign is negative exactly when the upper bound is at most
+        zero.
 
     """
     return -1.0 if reaction.upper_bound <= 0.0 else 1.0
@@ -90,7 +83,7 @@ def oriented_bounds(reaction: "Reaction", sign: Optional[float] = None) -> Tuple
     tuple of (float, float)
         The lower and upper bound on ``sign * flux``. For an unflipped
         reaction these are simply its own bounds; for a flipped one they are
-        its bounds negated and swapped, matching the MATLAB rewrite.
+        its bounds negated and swapped.
 
     """
     if sign is None:
@@ -112,9 +105,9 @@ def is_reversible(reaction: "Reaction", sign: Optional[float] = None) -> bool:
     Returns
     -------
     bool
-        Whether the oriented lower bound is negative. This is the ``model.rev``
-        flag the MATLAB implementation derives *after* flipping, so a reaction
-        restricted to negative flux counts as irreversible.
+        Whether the oriented lower bound is negative. Reversibility is
+        judged *after* orienting, so a reaction restricted to negative flux
+        counts as irreversible.
 
     """
     return oriented_bounds(reaction, sign)[0] < 0.0
@@ -132,15 +125,14 @@ def validate_consistency_type(consistency_type: str) -> bool:
     Returns
     -------
     bool
-        True for ``"stoichiometry"`` and False for ``"topology"``, matching the
-        ``steadystate`` flag the MATLAB routines pass around.
+        True for ``"stoichiometry"`` and False for ``"topology"``.
 
     Raises
     ------
     SpectraError
-        If `consistency_type` is neither of the two accepted values. The
-        MATLAB implementation silently leaves ``steadystate`` undefined in that
-        case, which fails later and less helpfully.
+        If `consistency_type` is neither of the two accepted values. Failing
+        here is deliberate: an unrecognised value that is allowed through
+        fails later and less helpfully.
 
     """
     if consistency_type not in CONSISTENCY_TYPES:
@@ -161,8 +153,8 @@ def relaxed_mass_balance(model: "Model", steady_state: bool) -> Iterator[None]:
         The model to operate on.
     steady_state : bool
         When True nothing is changed and ``S v = 0`` stays in force. When
-        False every metabolite constraint is relaxed to ``S v >= 0``, which is
-        the topology mode of the MATLAB implementation.
+        False every metabolite constraint is relaxed to ``S v >= 0``, which
+        is the topology mode.
 
     Yields
     ------
@@ -219,15 +211,15 @@ def apply_direction_bounds(
 
     Notes
     -----
-    This is the bound rewrite the MATLAB formulations share::
+    Every formulation shares this bound rewrite, in the oriented frame::
 
         lb(direction == 1) = max(tol, lb(direction == 1));
         ub(direction == -1) = -tol;
 
-    expressed in the model's own flux frame rather than the oriented one. Note
-    that for ``direction == -1`` the MATLAB code *assigns* ``-tol`` rather than
-    taking a minimum, so a reaction whose oriented upper bound is already
-    below ``-tol`` would have it raised. That is preserved here.
+    expressed here in the model's own flux frame instead. Note the asymmetry:
+    for ``direction == -1`` the upper bound is *assigned* ``-tol`` rather than
+    taking a minimum, so a reaction whose oriented upper bound already sits
+    below ``-tol`` has it raised.
 
     """
     for rxn_id, direction in directions.items():

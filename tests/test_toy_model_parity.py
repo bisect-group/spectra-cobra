@@ -1,24 +1,21 @@
-"""Reproduce the published MATLAB SPECTRA toy-model results.
+"""Reproduce the published SPECTRA toy-model results.
 
-These tests rebuild the toy models and experiments from the MATLAB
-implementation at https://github.com/bisect-group/spectra (``main`` branch) and
-assert that this port lands on the same answers. Three scripts are covered:
+These tests rebuild the published toy models and experiments and assert that
+this implementation lands on the same answers. Three are covered:
 
-``SPECTRA_CC_topology_vs_stoichiometry.m``
-    ``spectraCC`` on ``topology_toy_model(n)`` for n = 1, 2, 3 and on the two
-    ``get_cc_toy_model`` networks, under both consistency types.
-``SPECTRA_ME__topology_vs_stoichiometry.m``
-    ``spectraCCME`` on the same ``topology_toy_model(n)``, with the T1 export
-    as the single core reaction.
-``Objective_diff_toy_models.m``
+consistency, topology versus stoichiometry
+    :func:`spectra_cc` on ``topology_toy_model(n)`` for n = 1, 2, 3 and on the
+    two consistency-check toy networks, under both consistency types.
+extraction, topology versus stoichiometry
+    :func:`spectra_ccme` on the same ``topology_toy_model(n)``, with the T1
+    export as the single core reaction.
+objectives on the three-pathway model
     the network inference formulations on ``three_pathway_toy_model``, with
-    the weights that script uses, plus pathway exclusion. That script also
-    exercises ``minNetDC``, which this package does not provide.
+    the published weights, plus pathway exclusion.
 
-The expected values are derived from the models' own structure rather than
-copied from a MATLAB run, so each one is checked against what the
-stoichiometry actually permits. Where the port is known to differ from
-MATLAB, the test says so.
+Every expected value is derived from the models' own structure rather than
+copied from a published run, so each one is checked against what the
+stoichiometry actually permits.
 """
 
 from typing import Dict, List, Sequence, Set
@@ -443,9 +440,9 @@ def test_me_pathway_exclusion_enumerates_the_routes(
     """Pathway exclusion walks the distinct routes and then stops.
 
     The network offers three routes to ``d``, so asking for five solutions
-    yields the routes that exist and no duplicates. MATLAB's ``spectraME``
-    breaks out of its loop when the excluded solutions leave the problem
-    infeasible, and this does the same rather than raising.
+    yields the routes that exist and no duplicates. Once the excluded
+    solutions leave the problem infeasible the search stops rather than
+    raising.
     """
     models: List[Model] = spectra_me(
         three_pathway_toy_model(solver),

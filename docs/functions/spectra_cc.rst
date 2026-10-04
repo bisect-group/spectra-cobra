@@ -2,7 +2,7 @@ spectra_cc
 ==========
 
 Removes the blocked reactions of a metabolic network, leaving a flux
-consistent model. Ports ``spectraCC.m``.
+consistent model.
 
 Usage
 -----
@@ -60,13 +60,13 @@ cobrapy ships a version of this check as
      - both modes
    * - detection default
      - ``model.tolerance``
-     - ``0.99 * tol``, as MATLAB
+     - ``0.99 * tol``
 
 cobrapy's counts any nonzero flux, so it agrees exactly with ``fastcc`` and
-``find_blocked_reactions``. This one defaults to the stricter MATLAB
-criterion, where a reaction must reach ``tol`` itself, which also drops
-reactions that can carry *some* flux but never as much as ``tol``. Either
-behaviour is reachable from either package by setting the cutoff explicitly.
+``find_blocked_reactions``. This one is stricter by default: a reaction must
+reach ``tol`` itself, which also drops reactions that can carry *some* flux
+but never as much as ``tol``. Either behaviour is reachable from either
+package by setting the cutoff explicitly.
 
 Reference
 ---------

@@ -1,4 +1,4 @@
-"""Model extraction: ``spectraME`` and ``spectraCCME``.
+"""Model extraction.
 
 Both routines work in two phases. First an iterative phase alternates the
 forward and reverse LPs over the core reactions, accumulating a flux vector
@@ -47,11 +47,11 @@ PATHWAY_EXCLUSION = "pathwayExclusion"
 ALT_SOLUTION_METHODS = (CORE_DIRECTION, PATHWAY_EXCLUSION)
 
 #: The fraction of `tol` at which a core reaction counts as having had its
-#: direction settled, matching ``tol * 1e-1`` in ``spectraME.m``.
+#: direction settled.
 DIRECTION_CUTOFF_FACTOR = 1e-1
 
 #: The range the convex combination weight is drawn from when blending the
-#: flux of successive iterations, matching ``unifrnd(0.45, 0.55)``.
+#: flux of successive iterations.
 BLEND_RANGE = (0.45, 0.55)
 
 #: How far below `tol` a model's solver tolerance should sit. The extraction
@@ -194,9 +194,9 @@ def _blend(
     -------
     dict of {str: float}
         The convex combination ``c * accumulated + (1 - c) * new`` with ``c``
-        drawn from [0.45, 0.55], or `new` itself on the first iteration. This
-        is how the MATLAB implementation keeps a direction preference across
-        iterations rather than overwriting it.
+        drawn from [0.45, 0.55], or `new` itself on the first iteration.
+        Blending rather than overwriting is what keeps a direction preference
+        across iterations.
 
     """
     if accumulated is None or not any(accumulated.values()):
@@ -419,18 +419,28 @@ def _extract(model: "Model", keep_ids: Set[str], remove_genes: bool) -> "Model":
     cobra.Model
         The extracted model.
 
+    Notes
+    -----
+    Orphaned metabolites are always dropped, orphaned genes only when asked.
+    cobrapy's ``remove_orphans`` covers both at once, so it is left off here
+    and the two are handled separately; otherwise ``remove_genes=False``
+    would remove the genes regardless.
+
     """
     extracted = model.copy()
     extracted.remove_reactions(
         [rxn.id for rxn in model.reactions if rxn.id not in keep_ids],
-        remove_orphans=True,
+        remove_orphans=False,
     )
+    orphaned_metabolites = [met for met in extracted.metabolites if not met.reactions]
+    if orphaned_metabolites:
+        extracted.remove_metabolites(orphaned_metabolites)
     if remove_genes:
-        from cobra.manipulation import remove_genes
+        from cobra.manipulation import remove_genes as _remove_genes
 
-        unused = [g.id for g in extracted.genes if not g.reactions]
+        unused = [gene.id for gene in extracted.genes if not gene.reactions]
         if unused:
-            remove_genes(extracted, unused, remove_reactions=False)
+            _remove_genes(extracted, unused, remove_reactions=False)
     return extracted
 
 
@@ -444,7 +454,7 @@ def spectra_me(
     alt_solution_method: str = CORE_DIRECTION,
     problem_type: str = MIN_NET_LP,
     time_limit: Optional[float] = 7200.0,
-    remove_genes: bool = False,
+    remove_genes: bool = True,
     previous_solutions: Optional[List[Set[str]]] = None,
     seed: Optional[int] = None,
     inclusion_cutoff: Optional[float] = None,
@@ -494,7 +504,8 @@ def spectra_me(
         to carry flux. The mixed-integer formulations ignore it, since they
         read their answer off their binaries.
     remove_genes : bool, optional
-        Whether to drop the genes left without a reaction (default False).
+        Whether to drop the genes left without a reaction by the extraction
+        (default True). Orphaned metabolites are always dropped.
     previous_solutions : list of set of str, optional
         Reaction sets to exclude from the first solution too, for a
         mixed-integer `problem_type` (default None).
@@ -646,10 +657,9 @@ def _spectra_me(
         except SpectraSolverError:
             # Excluding every solution found so far can leave the problem with
             # no feasible answer, which simply means the network has no further
-            # alternative to offer. MATLAB's spectraME breaks out of its
-            # pathwayExclusion loop on a bad status for the same reason; the
-            # solutions already found still stand. A failure on the very first
-            # solve is a real error, so it is left to propagate.
+            # alternative to offer, so the solutions already found still
+            # stand. A failure on the very first solve is a real error, so it
+            # is left to propagate.
             if index > 0 and alt_solution_method == PATHWAY_EXCLUSION:
                 logger.info(
                     "No further alternative solution exists; returning the %d "
@@ -679,7 +689,7 @@ def spectra_ccme(
     alt_solution_method: str = CORE_DIRECTION,
     problem_type: str = MIN_NET_LP,
     time_limit: Optional[float] = 7200.0,
-    remove_genes: bool = False,
+    remove_genes: bool = True,
     seed: Optional[int] = None,
     inclusion_cutoff: Optional[float] = None,
 ) -> Tuple["Model", List[str]]:
@@ -720,7 +730,8 @@ def spectra_ccme(
         to carry flux. The mixed-integer formulations ignore it, since they
         read their answer off their binaries.
     remove_genes : bool, optional
-        Whether to drop the genes left without a reaction (default False).
+        Whether to drop the genes left without a reaction by the extraction
+        (default True). Orphaned metabolites are always dropped.
     seed : int, optional
         A seed for the random coefficients (default None).
 
@@ -730,13 +741,6 @@ def spectra_ccme(
         The extracted model (or a list of them if `n_solutions` is above one)
         and the identifiers of the core reactions that turned out to be
         blocked and so are absent from it.
-
-    Notes
-    -----
-    This ports ``spectraCCME.m``. Two bugs in that version are fixed here:
-    its ``growthOptim`` and ``tradeOff`` branches pass a misspelled
-    ``steadyState`` where the variable is ``steadystate``, so in MATLAB those
-    two problem types raise an undefined-variable error instead of running.
 
     See Also
     --------
@@ -814,7 +818,7 @@ def spectra_ccme(
         return first, blocked_core
 
     # Further solutions come from spectra_me on the consistent sub-model,
-    # which is what spectraCCME.m does, excluding the solution just found.
+    # excluding the solution just found.
     consistent = model.copy()
     consistent.remove_reactions(sorted(blocked_ids), remove_orphans=True)
     consistent_ids = {rxn.id for rxn in consistent.reactions}

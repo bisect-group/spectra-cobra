@@ -2,7 +2,7 @@ flux_reducer
 ============
 
 Finds a sparse flux distribution for a model, by minimising the sum of
-absolute fluxes. Ports ``FluxReducer.m``.
+absolute fluxes.
 
 Usage
 -----

@@ -6,10 +6,8 @@ reconstructions, minimal microbiomes, microbial community models and
 multi-tissue models. What changes between them is the universal model, the
 evidence supplied and the objective chosen, not the routine called.
 
-This implementation is built on :mod:`cobra`, expressing the formulations
-through cobrapy's own solver interface rather than raw matrices. A MATLAB
-implementation built on the COBRA Toolbox is also available; see the
-documentation for the differences between the two.
+It is built on :mod:`cobra`, expressing the formulations through cobrapy's
+own solver interface rather than raw matrices.
 
 The usual order of operations is:
 

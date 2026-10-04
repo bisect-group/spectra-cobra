@@ -91,9 +91,9 @@ with cobrapy's own ``fastcc``:
 
    True
 
-The default ``detection_cutoff`` is ``0.99 * tol``, which is MATLAB's
-criterion and a stricter one: it also discards reactions that can carry *some*
-flux but never as much as ``tol``. Which you want depends on whether ``tol``
+The default ``detection_cutoff`` is ``0.99 * tol``, the stricter criterion:
+it also discards reactions that can carry *some* flux but never as much as
+``tol``. Which you want depends on whether ``tol``
 is a meaningful flux magnitude for your problem or just a numerical floor.
 
 Choosing ``tol``

@@ -1,11 +1,10 @@
 """The three auxiliary LPs that SPECTRA's iterative phases are built from.
 
-These port ``forwardcc.m``, ``forward.m`` and ``reverse.m``. All three share a
-shape: an auxiliary variable per reaction of interest is tied to that
-reaction's oriented flux by a one-sided constraint, and a randomly weighted sum
-of those auxiliary variables is pushed as far as the flux bounds allow. The
-randomised weights (``unifrnd(1, 1.1)`` in MATLAB) break ties between
-reactions, so repeated calls explore different corners of the optimal face.
+All three share a shape: an auxiliary variable per reaction of interest is
+tied to that reaction's oriented flux by a one-sided constraint, and a
+randomly weighted sum of those auxiliary variables is pushed as far as the
+flux bounds allow. The randomised weights break ties between reactions, so
+repeated calls explore different corners of the optimal face.
 
 The three differ only in which reactions they cover and which way they push:
 
@@ -39,8 +38,7 @@ if TYPE_CHECKING:
 
 logger = getLogger(__name__)
 
-#: Lower and upper limit of the uniformly sampled objective coefficients,
-#: matching ``unifrnd(1, 1.1)`` in the MATLAB implementation.
+#: Lower and upper limit of the uniformly sampled objective coefficients.
 WEIGHT_RANGE = (1.0, 1.1)
 
 
@@ -179,8 +177,8 @@ def _push(
 
         if reverse:
             # z_i >= -tol and v_i <= z_i, minimised: drives v_i down to -tol.
-            # Unbounded above, as ``reverse.m`` has +Inf: a finite bound
-            # would silently bind on a model with large flux bounds.
+            # Unbounded above on purpose: a finite bound would silently
+            # bind on a model with large flux bounds.
             var = prob.Variable(f"spectra_aux_{rxn_id}", lb=-tol, ub=None)
             constraints.append(
                 prob.Constraint(
@@ -189,9 +187,9 @@ def _push(
             )
         else:
             # z_i <= tol and v_i >= z_i, maximised: drives v_i up to tol.
-            # Unbounded below, as ``forwardcc.m`` has -Inf, so that a
-            # reaction unable to go positive merely fails to contribute
-            # rather than making the whole LP infeasible.
+            # Unbounded below on purpose, so that a reaction unable to go
+            # positive merely fails to contribute rather than making the
+            # whole LP infeasible.
             var = prob.Variable(f"spectra_aux_{rxn_id}", lb=None, ub=tol)
             constraints.append(
                 prob.Constraint(
@@ -221,9 +219,9 @@ def forward_cc(
 ) -> Optional[Dict[str, float]]:
     """Drive as many of the given reactions as possible to positive flux.
 
-    This ports ``forwardcc.m``. Every reaction given gets an auxiliary
-    variable, and none of them is forced to carry flux, so the LP is always
-    feasible as long as the model itself is.
+    Every reaction given gets an auxiliary variable, and none of them is
+    forced to carry flux, so the LP is always feasible as long as the model
+    itself is.
 
     Parameters
     ----------
@@ -265,9 +263,8 @@ def reverse(
 ) -> Optional[Dict[str, float]]:
     """Drive as many of the given reversible reactions as possible negative.
 
-    This ports ``reverse.m``. Only the reversible reactions among `rxn_ids`
-    are considered, since an irreversible one cannot carry negative oriented
-    flux by definition.
+    Only the reversible reactions among `rxn_ids` are considered, since an
+    irreversible one cannot carry negative oriented flux by definition.
 
     Parameters
     ----------
@@ -317,11 +314,11 @@ def forward(
 ) -> Dict[str, float]:
     """Drive the given reactions to positive flux, pinning irreversible ones.
 
-    This ports ``forward.m``, the variant used during model extraction. It
-    differs from :func:`forward_cc` in that the *irreversible* reactions given
-    are required to carry at least `tol` through their lower bound, rather
-    than merely rewarded for doing so. Only the reversible ones get an
-    auxiliary variable.
+    This is the variant used during model extraction. It differs from
+    :func:`forward_cc` in that the *irreversible* reactions given are required
+    to carry at least `tol` through their lower bound, rather than merely
+    rewarded for doing so. Only the reversible ones get an auxiliary
+    variable.
 
     Parameters
     ----------
@@ -345,8 +342,8 @@ def forward(
     ------
     SpectraInfeasibleCoreError
         If no flux distribution lets every pinned reaction carry `tol` at
-        once. The MATLAB implementation warns and returns ``NaN`` here, which
-        makes its caller loop forever.
+        once. Raising is deliberate: returning a ``NaN`` solution here leaves
+        the caller looping forever.
 
     """
     rxn_ids = list(rxn_ids)

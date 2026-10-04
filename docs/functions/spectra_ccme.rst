@@ -2,7 +2,6 @@ spectra_ccme
 ============
 
 Checks consistency and extracts a context-specific model in a single pass.
-Ports ``spectraCCME.m``.
 
 Use this instead of :doc:`spectra_cc` followed by :doc:`spectra_me` when the
 universal model is not known to be flux consistent. Blocked core reactions

@@ -42,8 +42,8 @@ def flux_reducer(
 
     Notes
     -----
-    This ports ``FluxReducer.m``, which minimises the sum of absolute fluxes.
-    The objective is built so that an irreversible reaction is charged for its
+    Minimises the sum of absolute fluxes. The objective is built so that an
+    irreversible reaction is charged for its
     own flux directly, while a reversible one is charged through an
     absolute-value variable, which spares the problem an extra variable per
     irreversible reaction:

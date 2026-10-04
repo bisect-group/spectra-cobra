@@ -228,17 +228,55 @@ def test_does_not_modify_the_input_model(toy_model: Model) -> None:
 
 
 def test_remove_genes_drops_orphans(toy_model: Model) -> None:
-    """Orphaned genes are dropped when asked for."""
+    """Orphaned genes are dropped when asked for, and kept when not.
+
+    ``remove_orphans`` in cobrapy covers genes and metabolites together, so
+    passing it would drop the genes whatever ``remove_genes`` said. The two
+    are handled separately for that reason, and this pins the distinction:
+    an earlier version of this test compared the counts with ``<=`` and so
+    passed while they were always equal.
+    """
     toy_model.reactions.R7.gene_reaction_rule = "g_unused"
     toy_model.reactions.R3.gene_reaction_rule = "g_used"
 
     kept = spectra_me(toy_model, ["R3"], remove_genes=False, seed=0)
     pruned = spectra_me(toy_model, ["R3"], remove_genes=True, seed=0)
 
-    # R7 is not in either extracted model, so its gene is an orphan.
+    # R7 is in neither extracted model, so its gene is an orphan in both.
     assert "R7" not in _ids(kept) and "R7" not in _ids(pruned)
-    assert "g_used" in {g.id for g in pruned.genes}
-    assert len({g.id for g in pruned.genes}) <= len({g.id for g in kept.genes})
+    assert {g.id for g in pruned.genes} == {"g_used"}
+    assert {g.id for g in kept.genes} == {"g_used", "g_unused"}
+
+
+def test_genes_are_removed_by_default(toy_model: Model) -> None:
+    """The default is to prune, so an extraction carries no orphaned genes."""
+    toy_model.reactions.R7.gene_reaction_rule = "g_unused"
+    toy_model.reactions.R3.gene_reaction_rule = "g_used"
+
+    extracted = spectra_me(toy_model, ["R3"], seed=0)
+
+    assert [g.id for g in extracted.genes if not g.reactions] == []
+    assert {g.id for g in extracted.genes} == {"g_used"}
+
+
+def test_orphaned_metabolites_go_whatever_remove_genes_says(
+    toy_model: Model,
+) -> None:
+    """Keeping the genes must not also keep metabolites nothing touches."""
+    for flag in (False, True):
+        extracted = spectra_me(toy_model, ["R3"], remove_genes=flag, seed=0)
+        orphans = [met.id for met in extracted.metabolites if not met.reactions]
+        assert orphans == [], f"remove_genes={flag} left {orphans}"
+
+
+def test_gene_reaction_rules_survive_pruning(toy_model: Model) -> None:
+    """A kept reaction keeps the genes its rule names."""
+    toy_model.reactions.R3.gene_reaction_rule = "g_a or g_b"
+
+    extracted = spectra_me(toy_model, ["R3"], remove_genes=True, seed=0)
+
+    assert {g.id for g in extracted.reactions.R3.genes} == {"g_a", "g_b"}
+    assert extracted.reactions.R3.gene_reaction_rule == "g_a or g_b"
 
 
 def test_warns_when_the_solver_tolerance_is_loose(toy_model: Model, caplog) -> None:

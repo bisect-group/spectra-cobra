@@ -1,4 +1,4 @@
-"""The SPECTRA consistency check, ``spectraCC``."""
+"""The SPECTRA consistency check."""
 
 from logging import getLogger
 from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
@@ -41,8 +41,8 @@ def consistent_reaction_ids(
         condition (``S v >= 0``) (default "stoichiometry").
     detection_cutoff : float, optional
         The absolute flux at which a reaction counts as carrying flux. The
-        MATLAB implementation uses ``0.99 * tol``, which is the default here;
-        pass ``model.tolerance`` instead to count any nonzero flux, matching
+        default requires a reaction to reach ``tol`` itself; pass
+        ``model.tolerance`` instead to count any nonzero flux, matching
         :func:`cobra.flux_analysis.fastcc` (default ``0.99 * tol``).
     seed : int, optional
         A seed for the random objective coefficients, making the result
@@ -131,7 +131,7 @@ def spectra_cc(
         consistent reactions than stoichiometry mode.
     detection_cutoff : float, optional
         The absolute flux at which a reaction counts as carrying flux
-        (default ``0.99 * tol``, as in MATLAB).
+        (default ``0.99 * tol``).
     seed : int, optional
         A seed for the random objective coefficients (default None).
 
@@ -139,32 +139,6 @@ def spectra_cc(
     -------
     cobra.Model
         The consistent model.
-
-    Notes
-    -----
-    The pair of LPs is like so:
-
-    .. math::
-
-        \text{maximize}   &\quad \sum_{i \in J} w_i z_i \\
-        \text{subject to} &\quad z_i \le \varepsilon,\;
-                                 v_i \ge z_i \quad \forall i \in J \\
-                          &\quad S v = 0, \; v \in B
-
-        \text{minimize}   &\quad \sum_{i \in J^{rev}} w_i z_i \\
-        \text{subject to} &\quad z_i \ge -\varepsilon,\;
-                                 v_i \le z_i \quad \forall i \in J^{rev} \\
-                          &\quad S v = 0, \; v \in B
-
-    where :math:`J` are the reactions not yet shown to carry flux,
-    :math:`J^{rev}` the reversible ones among them, and :math:`w_i` are drawn
-    uniformly from [1, 1.1].
-
-    A version of this function is also available in cobrapy itself as
-    :func:`cobra.flux_analysis.spectra_cc`. That one covers steady state only
-    and defaults to counting any nonzero flux, for consistency with
-    :func:`cobra.flux_analysis.fastcc`; this one additionally offers the
-    topology mode and defaults to the stricter MATLAB criterion.
 
     See Also
     --------

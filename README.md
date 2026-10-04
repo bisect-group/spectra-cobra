@@ -10,10 +10,9 @@ reconstructions, minimal microbiomes, microbial community models and
 multi-tissue models. What changes between them is the universal model, the
 evidence supplied and the objective chosen, not the routine called.
 
-A [MATLAB implementation](https://github.com/NiravBhattLab/SPECTRA) is also
-available; see [differences from
-MATLAB](https://spectra-cobra.readthedocs.io/en/latest/matlab_differences.html)
-if you are moving between the two.
+SPECTRA is also available as a
+[MATLAB package](https://github.com/NiravBhattLab/SPECTRA) for the COBRA
+Toolbox.
 
 Documentation: <https://spectra-cobra.readthedocs.io>
 
@@ -83,10 +82,6 @@ than necessary. `minNetMILP` minimises the count exactly. On the textbook
 model the difference is visible: `minNetLP` keeps 27 reactions where
 `minNetMILP` keeps 16.
 
-MATLAB's `minNetDC`, a third route to the same objective, is not provided.
-It delegates to the COBRA Toolbox's `optimizeCardinality`, which cobrapy has
-no equivalent of; `minNetMILP` solves that objective exactly instead.
-
 `tradeOff` is the one to use when your omics data gives both positive and
 negative evidence, since a positive weight pushes a reaction in and a
 negative one pushes it out:
@@ -128,9 +123,8 @@ Every routine takes `consistency_type`:
 
 ## Reproducibility
 
-The LPs use randomised objective coefficients (`unifrnd(1, 1.1)` in MATLAB) to
-break ties between reactions, so results vary between runs. Pass `seed` to pin
-them:
+The LPs use randomised objective coefficients to break ties between
+reactions, so results vary between runs. Pass `seed` to pin them:
 
 ```python
 extracted = spectra_me(model, core, seed=0)  # same answer every time
@@ -144,49 +138,25 @@ The consistency check is also being contributed to cobrapy itself as
 |                     | cobrapy's            | this package's          |
 |---------------------|----------------------|-------------------------|
 | `consistency_type`  | steady state only    | both modes              |
-| detection default   | `model.tolerance`    | `0.99 * tol` (MATLAB's) |
+| detection default   | `model.tolerance`    | `0.99 * tol`            |
 
 cobrapy's version counts any nonzero flux, so it agrees exactly with `fastcc`
-and `find_blocked_reactions`. This one defaults to the stricter MATLAB
-criterion, where a reaction must reach `tol` itself — which also drops
-reactions that can carry *some* flux but never as much as `tol`. Either
-behaviour is reachable from either package by setting the cutoff explicitly.
-
-## Differences from the MATLAB implementation
-
-The formulations are ported as-is; the mechanics around them are not.
-
-- **No model mutation.** MATLAB negates the stoichiometric columns of
-  reactions with `ub <= 0` and rewrites their bounds. Here that orientation is
-  a per-reaction sign applied to the reaction's flux expression, so the input
-  model is never modified. The two are equivalent because negating a column
-  and negating its variable cancel out.
-- **Failures raise.** MATLAB warns and returns `NaN` or an empty solution when
-  an LP does not reach optimality. Its callers then misread that: in
-  `spectraME`, `abs(NaN) >= tol` is false, so the loop waiting for core
-  reactions to be explained never terminates. Here an infeasible core set
-  raises `SpectraInfeasibleCoreError` instead of hanging.
-- **Two MATLAB bugs fixed.** `spectraCCME.m` passes a misspelled `steadyState`
-  to its `growthOptim` and `tradeOff` branches where the variable is
-  `steadystate`, so in MATLAB those two problem types raise an
-  undefined-variable error rather than running. Both work here.
-- **`minNetDC` is not ported.** MATLAB delegates it to the COBRA Toolbox's
-  `optimizeCardinality`, which cobrapy has no equivalent of.
-  `minNetMILP` targets the same objective and solves it exactly.
-- **`spectraME2` is not ported.** It is an older LP-only subset of
-  `spectraME`, which covers everything it does.
+and `find_blocked_reactions`. This one is stricter by default: a reaction must
+reach `tol` itself — which also drops reactions that can carry *some* flux but
+never as much as `tol`. Either behaviour is reachable from either package by
+setting the cutoff explicitly.
 
 ## Validation
 
-### Parity with the MATLAB implementation
+### Parity with the published results
 
-[`tests/test_matlab_parity.py`](tests/test_matlab_parity.py) rebuilds the toy
-models and experiments from the MATLAB repository and checks this port lands on
+[`tests/test_toy_model_parity.py`](tests/test_toy_model_parity.py) rebuilds the
+published toy models and experiments and checks this implementation lands on
 the same answers. Expected values are derived from each model's own
-stoichiometry rather than copied from a MATLAB run, so they are checked rather
-than assumed.
+stoichiometry rather than copied from a published run, so they are checked
+rather than assumed.
 
-**`SPECTRA_CC_topology_vs_stoichiometry.m`** — consistent reactions found:
+**Consistency, topology versus stoichiometry** — consistent reactions found:
 
 | model | stoichiometry | topology |
 |---|---|---|
@@ -204,13 +174,13 @@ produced and never consumed, which accumulation rescues; model 2's `C` is
 consumed and never produced, which it cannot, since `S·v ≥ 0` lets a
 metabolite pile up but not appear from nothing.
 
-**`SPECTRA_ME__topology_vs_stoichiometry.m`** — extraction with the T1 export
+**Extraction, topology versus stoichiometry** — with the T1 export
 as the sole core reaction reproduces the same split: under stoichiometry the
 core is blocked and reported for `n = 1` and `n = 3`, while topology recovers
 the full six-reaction network for every `n`.
 
-**`Objective_diff_toy_models.m`** — the formulations on
-`three_pathway_toy_model`, with that script's own weights:
+**Objectives on the three-pathway model** — the formulations on
+`three_pathway_toy_model`, with the published weights:
 
 | `problem_type` | result | reactions |
 |---|---|---|
@@ -227,13 +197,11 @@ least-flux route, and `minNetLP` (5 reactions) genuinely diverges from
 whose published weights sum positive (+2, against −1 each for the others).
 
 Pathway exclusion asked for five solutions returns **exactly the three routes
-the network has**, with no duplicates, then stops — matching the `if stat~=1
-break` in MATLAB's `spectraME`.
+the network has**, with no duplicates, then stops.
 
 ### Genome scale: Recon3D
 
-Note that the models shipped with the MATLAB work are *already* consistency
-checked — `UpdatedRecon3D.mat` and `consRecon3DGeneSymbol.mat` (11303
+Note that the published models are *already* consistency checked — `UpdatedRecon3D.mat` and `consRecon3DGeneSymbol.mat` (11303
 reactions) and the PCOS study's `Reconmodel.mat` (10600) all have zero blocked
 reactions. Running the check on those confirms only that the files are what
 they claim. To see it do work, Recon3D was restricted to a defined medium,
@@ -284,7 +252,7 @@ and at the `1e-7` default that residual is enough to break chains carrying
 flux of order `tol`. `spectra_me` warns when the two are within a factor of
 1e4.
 
-The cause is the inclusion rule inherited from MATLAB: keep a reaction if its
+The cause is the inclusion rule: keep a reaction if its
 extraction-LP flux exceeds `tol * 1e-7`, floored here at `model.tolerance`, so
 around `1e-7`. A handful of reactions end up carrying flux *just under* that
 cutoff while doing load-bearing balancing work. Dropping them leaves a
@@ -349,4 +317,4 @@ used with weights that carry both signs.
 
 ## License
 
-MIT, as with the MATLAB implementation. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

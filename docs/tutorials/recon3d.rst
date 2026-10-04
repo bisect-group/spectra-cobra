@@ -6,7 +6,7 @@ page runs the same workflow on Recon3D, the human reconstruction SPECTRA's own
 experiments use, and reports what actually happens — including where the
 default formulation falls short.
 
-The model used here is the consistent Recon3D from the MATLAB repository:
+The model used here is the consistent Recon3D distributed with SPECTRA:
 11303 reactions over 6388 metabolites.
 
 Getting a fully consistent model
@@ -31,7 +31,7 @@ modelling actually starts, most exchanges closed — that gives:
 
 .. note::
 
-   The files in the MATLAB repository's ``Recon3D+/`` directory are *already*
+   The files in the SPECTRA repository's ``Recon3D+/`` directory are *already*
    consistency-checked: both ``UpdatedRecon3D.mat`` and
    ``consRecon3DGeneSymbol.mat`` hold 11303 reactions with nothing blocked, as
    does the ``Reconmodel.mat`` used in the PCOS study (10600 reactions, 0
@@ -446,7 +446,7 @@ Reproducing this
 
 The scripts behind this page are not shipped with the package, since Recon3D
 is not redistributed here. Get the model from the
-`MATLAB repository <https://github.com/bisect-group/spectra>`_ at
+`SPECTRA repository <https://github.com/bisect-group/spectra>`_ at
 ``Recon3D+/consRecon3DGeneSymbol.mat``. Note that cobrapy's
 ``load_matlab_model`` rejects it, because the GeneSymbol variant has duplicate
 gene symbols; load the stoichiometry with :mod:`scipy.io` and build the model
@@ -456,4 +456,3 @@ Next
 ----
 
 * :doc:`formulations` — the trade-offs between the formulations
-* :doc:`../matlab_differences` — what else differs from MATLAB

@@ -8,10 +8,10 @@ class SpectraError(Exception):
 class SpectraSolverError(SpectraError):
     """Raised when an LP or MILP does not reach an acceptable status.
 
-    The MATLAB implementation warns and returns an empty or ``NaN`` solution
-    in this situation, which the callers then misread: ``abs(NaN) >= tol`` is
-    false, so a loop waiting for reactions to be explained never terminates.
-    Raising instead surfaces the failure where it happens.
+    Raising surfaces the failure where it happens. Returning an empty or
+    ``NaN`` solution instead is easy to misread downstream: ``abs(NaN) >=
+    tol`` is false, so a loop waiting for reactions to be explained would
+    never terminate.
     """
 
     def __init__(self, message: str, status: str = None) -> None:

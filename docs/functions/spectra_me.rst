@@ -1,8 +1,7 @@
 spectra_me
 ==========
 
-Extracts a context-specific model around a set of core reactions. Ports
-``spectraME.m``.
+Extracts a context-specific model around a set of core reactions.
 
 The input model must be flux consistent. Run :doc:`spectra_cc` first, or use
 :doc:`spectra_ccme`, which folds the check in.

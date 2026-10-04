@@ -11,9 +11,6 @@ and multi-tissue models. What changes between them is the universal model,
 the evidence supplied and the objective chosen, not the routine called. It is
 built on `cobrapy <https://github.com/opencobra/cobrapy>`_.
 
-A `MATLAB implementation <https://github.com/NiravBhattLab/SPECTRA>`_ is also
-available; see :doc:`matlab_differences` if you are moving between the two.
-
 At a glance
 -----------
 
@@ -36,29 +33,22 @@ What is in the package
 
 .. list-table::
    :header-rows: 1
-   :widths: 22 48 30
+   :widths: 30 70
 
    * - Function
      - Does
-     - MATLAB equivalent
    * - :doc:`functions/spectra_cc`
      - Removes the blocked reactions of a model
-     - ``spectraCC.m``
    * - :doc:`functions/spectra_me`
      - Extracts a context-specific model around a core set
-     - ``spectraME.m``
    * - :doc:`functions/spectra_ccme`
      - Both at once, for a model that may be inconsistent
-     - ``spectraCCME.m``
    * - :doc:`functions/formulations`
      - The network inference objectives the extraction can use
-     - ``minNet.m``, ``tradeOff.m``, ``growthOptim.m``
    * - :doc:`functions/flux_reducer`
      - Finds a sparse flux distribution
-     - ``FluxReducer.m``
    * - :doc:`functions/verification`
      - Checks an extracted model is consistent and complete
-     - —
 
 Which function do I want?
 -------------------------
@@ -110,5 +100,4 @@ Citation
    :maxdepth: 1
    :caption: About
 
-   matlab_differences
    api
