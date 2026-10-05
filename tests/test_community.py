@@ -7,6 +7,7 @@ from spectra_cobra import SpectraError
 from spectra_cobra.community import (
     COUPLING_THRESHOLD,
     ORGANISM_SEPARATOR,
+    POOLED,
     SHARED,
     build_community_model,
 )
@@ -489,3 +490,99 @@ def test_multi_tissue_replicates_one_model_across_tissues(solver: str) -> None:
     assert not [
         rxn_id for rxn_id in body.reactions_of["tis3"] if rxn_id.endswith("_Bl__tis3")
     ]
+
+
+def _eater(name: str, met_id: str, solver: str, compartment: str = "e") -> Model:
+    """Return a one-reaction unit that eats one external metabolite."""
+    model = Model(name)
+    outside = Metabolite(met_id, compartment=compartment)
+    inside = Metabolite("x_c", compartment="c")
+    model.add_metabolites([outside, inside])
+    uptake = Reaction("UP", lower_bound=0.0, upper_bound=1000.0)
+    biomass = Reaction("biomass", lower_bound=0.0, upper_bound=1000.0)
+    model.add_reactions([uptake, biomass])
+    uptake.add_metabolites({outside: -1.0, inside: 1.0})
+    biomass.add_metabolites({inside: -1.0})
+    model.add_boundary(outside, type="exchange")
+    model.objective = biomass
+    model.solver = solver
+    return model
+
+
+@pytest.mark.parametrize("mode", [POOLED, SHARED])
+def test_both_spellings_meet_in_the_pool_in_either_mode(solver: str, mode) -> None:
+    """ "glc_e" and "glc[e]" are the same compound and must share a row.
+
+    Getting this wrong is silent and total: each unit would trade through
+    a pool of its own, named after its own spelling, and the community
+    would never cross-feed.
+    """
+    community = build_community_model(
+        [_eater("a", "glc_e", solver), _eater("b", "glc[e]", solver)],
+        organisms=["A", "B"],
+        mode=mode,
+        check=False,
+    )
+
+    pooled = [m.id for m in community.model.metabolites if m.compartment in {"u", "e"}]
+    assert len(pooled) == 1, f"got {pooled}"
+    assert len(community.community_exchanges) == 1
+
+
+def test_the_external_compartment_is_found_per_unit(solver: str) -> None:
+    """The units need not agree on what it is called."""
+    community = build_community_model(
+        [
+            _eater("a", "glc_e", solver),
+            _eater("b", "glc_extracellular", solver, compartment="extracellular"),
+        ],
+        organisms=["A", "B"],
+        check=False,
+    )
+
+    assert [m.id for m in community.model.metabolites if m.compartment == "u"] == [
+        "glc_u"
+    ], "both units' glucose should reach the same pool metabolite"
+
+
+def test_units_sharing_nothing_are_reported(solver: str, caplog) -> None:
+    """Identifiers from different namespaces cannot be guessed apart."""
+    with caplog.at_level("WARNING"):
+        build_community_model(
+            [_eater("a", "glc__D_e", solver), _eater("b", "glc_D[e]", solver)],
+            organisms=["A", "B"],
+            check=False,
+        )
+
+    assert "nothing can cross-feed" in caplog.text
+    assert "metabolite_key" in caplog.text
+
+
+def test_metabolite_key_reconciles_two_namespaces(solver: str) -> None:
+    """The escape hatch for models that do not share a naming scheme."""
+    import re
+
+    community = build_community_model(
+        [_eater("a", "glc__D_e", solver), _eater("b", "glc_D[e]", solver)],
+        organisms=["A", "B"],
+        metabolite_key=lambda met: re.sub(r"_+D(_e|\[e\])$", "_D", met.id),
+        check=False,
+    )
+
+    assert [m.id for m in community.model.metabolites if m.compartment == "u"] == [
+        "glc_D_u"
+    ]
+
+
+def test_a_medium_naming_an_absent_metabolite_says_so(solver: str, caplog) -> None:
+    """A typo in a medium should not quietly do nothing."""
+    with caplog.at_level("WARNING"):
+        build_community_model(
+            [_eater("a", "glc_e", solver)],
+            organisms=["A"],
+            pool_medium={"glc_e": (-10.0, 1000.0), "nosuch_e": (-5.0, 0.0)},
+            check=False,
+        )
+
+    assert "are in no unit and were ignored" in caplog.text
+    assert "nosuch_e" in caplog.text

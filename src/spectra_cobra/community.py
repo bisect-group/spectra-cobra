@@ -41,6 +41,7 @@ from dataclasses import dataclass, field
 from logging import getLogger
 from typing import (
     TYPE_CHECKING,
+    Callable,
     Dict,
     Iterable,
     List,
@@ -48,12 +49,13 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
+    Union,
 )
 
 from .exceptions import SpectraError
 
 if TYPE_CHECKING:
-    from cobra.core import Model
+    from cobra.core import Metabolite, Model
 
 
 logger = getLogger(__name__)
@@ -717,28 +719,162 @@ def _merge_with_database(
     return merged, sorted(draft_ids), sorted(database_ids - draft_ids)
 
 
-def _bounds_by_base(
-    bounds: Optional[Mapping[str, Tuple[float, float]]], compartment: str
+def _external_compartments(
+    units: Sequence["Model"],
+    organisms: Sequence[str],
+    given: Optional[Union[str, Mapping[str, str]]],
+) -> Dict[str, str]:
+    """Return the external compartment of each unit.
+
+    Parameters
+    ----------
+    units : sequence of cobra.Model
+        The models.
+    organisms : sequence of str
+        Their names, in the same order.
+    given : str or mapping, optional
+        One compartment for all of them, or one per unit, or None to work
+        it out from each model.
+
+    Returns
+    -------
+    dict of {str: str}
+        The compartment whose metabolites each unit may exchange.
+
+    Notes
+    -----
+    Worked out per unit rather than once for the community, because the
+    units need not agree: one model may call it ``e`` and another
+    ``extracellular``. cobrapy's own heuristic does the work -- a
+    compartment with a recognised name, else the one carrying the most
+    boundary reactions -- and ``"e"`` is the fallback if it cannot tell,
+    since that is what nearly every reconstruction uses.
+
+    """
+    from cobra.medium import find_external_compartment
+
+    if isinstance(given, str):
+        return {organism: given for organism in organisms}
+
+    resolved: Dict[str, str] = {}
+    for model, organism in zip(units, organisms):
+        if given is not None and organism in given:
+            resolved[organism] = given[organism]
+            continue
+        try:
+            resolved[organism] = find_external_compartment(model)
+        except (RuntimeError, KeyError, IndexError) as error:
+            resolved[organism] = "e"
+            logger.warning(
+                "%s: could not tell which compartment is external (%s), so "
+                "assuming 'e'. Pass external_compartment to be sure.",
+                organism,
+                error,
+            )
+    distinct = sorted(set(resolved.values()))
+    if len(distinct) > 1:
+        logger.info("external compartments differ between units: %s", distinct)
+    return resolved
+
+
+def _resolve_bounds(
+    bounds: Optional[Mapping[str, Tuple[float, float]]],
+    key_of_metabolite: Mapping[str, str],
+    what: str,
 ) -> Dict[str, Tuple[float, float]]:
-    """Return metabolite bounds keyed by identifier without a compartment.
+    """Return bounds keyed by pool identity rather than by metabolite.
 
     Parameters
     ----------
     bounds : mapping, optional
-        Bounds keyed by metabolite identifier as the unit models spell it.
-    compartment : str
-        The external compartment to strip.
+        Bounds keyed by metabolite identifier, as any unit spells it.
+    key_of_metabolite : mapping of {str: str}
+        The pool identity of each exchangeable metabolite.
+    what : str
+        The argument's name, for the warning.
 
     Returns
     -------
     dict of {str: tuple of float}
-        The same bounds, keyed so that either spelling resolves.
+        The same bounds, keyed so that any unit's spelling resolves.
+
+    Notes
+    -----
+    Resolved by looking each identifier up among the metabolites that
+    actually exist rather than by stripping a suffix off it, so a
+    metabolite named in a medium but present in no unit is reported
+    instead of silently doing nothing.
 
     """
-    return {
-        _strip_compartment(met_id, compartment): (float(lower), float(upper))
-        for met_id, (lower, upper) in (bounds or {}).items()
-    }
+    resolved: Dict[str, Tuple[float, float]] = {}
+    unmatched = []
+    for met_id, (lower, upper) in (bounds or {}).items():
+        key = key_of_metabolite.get(met_id)
+        if key is None:
+            unmatched.append(met_id)
+            continue
+        resolved[key] = (float(lower), float(upper))
+    if unmatched:
+        logger.warning(
+            "%d of %d metabolites named in %s are in no unit and were "
+            "ignored, for example %s",
+            len(unmatched),
+            len(bounds or {}),
+            what,
+            sorted(unmatched)[:5],
+        )
+    return resolved
+
+
+def _report_sharing(
+    pool_members: Mapping[str, Sequence[str]],
+    touched: Mapping[Tuple[str, str], set],
+    examples: Mapping[str, Sequence[str]],
+) -> None:
+    """Warn when the units of a pool have nothing in common.
+
+    Parameters
+    ----------
+    pool_members : mapping
+        The units in each pool.
+    touched : mapping of {(str, str): set of str}
+        Which units reach each pool metabolite.
+    examples : mapping of {str: sequence of str}
+        A few exchangeable metabolite identifiers per unit.
+
+    Notes
+    -----
+    The failure this catches is silent and total. Two models can both
+    report an ``e`` compartment and still share nothing, because one
+    writes ``glc__D_e`` and the other ``glc_D[e]``: every unit then trades
+    through a pool of its own and the community never cross-feeds, with
+    no error anywhere. Compartment detection cannot fix that -- the
+    identifiers belong to different namespaces -- so it is reported, and
+    `metabolite_key` is how to resolve it.
+
+    """
+    for pool, members in pool_members.items():
+        if len(members) < 2:
+            continue
+        shared = sum(
+            1
+            for (where, _), units in touched.items()
+            if where == pool and len(units) > 1
+        )
+        if shared:
+            logger.info(
+                "pool %r: %d metabolites reached by more than one unit", pool, shared
+            )
+            continue
+        logger.warning(
+            "pool %r is shared by %d units but not one metabolite in it is "
+            "reached by more than one of them, so nothing can cross-feed. "
+            "The usual cause is identifiers from different namespaces; "
+            "pass metabolite_key to say how they correspond. Examples: %s",
+            pool,
+            len(members),
+            {unit: list(examples.get(unit, ()))[:3] for unit in list(members)[:3]},
+        )
 
 
 def _measure_anchors(
@@ -815,7 +951,8 @@ def build_community_model(
     link_bounds: Optional[Mapping[str, Tuple[float, float]]] = None,
     pool_medium: Optional[Mapping[str, Tuple[float, float]]] = None,
     shared_compartment: str = SHARED_SUFFIX,
-    external_compartment: str = "e",
+    external_compartment: Optional[Union[str, Mapping[str, str]]] = None,
+    metabolite_key: Optional[Callable[["Metabolite"], str]] = None,
     couple: bool = True,
     coupling_factor: float = COUPLING_FACTOR,
     coupling_threshold: float = COUPLING_THRESHOLD,
@@ -868,9 +1005,18 @@ def build_community_model(
         Anything unnamed keeps its default bounds.
     shared_compartment : str, optional
         The name of the default pool (default ``"u"``).
-    external_compartment : str, optional
-        The compartment whose metabolites are exchangeable (default
-        ``"e"``).
+    external_compartment : str or mapping, optional
+        The compartment whose metabolites are exchangeable: one name for
+        every unit, or one per unit. Left out, each unit's is worked out
+        from the model, which matters because the units need not agree --
+        one may call it ``e`` and another ``extracellular``.
+    metabolite_key : callable, optional
+        Given a metabolite, return the name of the thing it *is*, so that
+        two units naming the same compound differently still meet in the
+        pool. The default strips the compartment, which resolves
+        ``glc_D_e`` and ``glc_D[e]`` to the same ``glc_D`` but cannot
+        reconcile identifiers from different namespaces. Supply this when
+        joining models from collections that do not share one.
     couple : bool, optional
         Whether to tie each unit's reactions to its own anchor (default
         True). Without this a unit that is not growing can still run its
@@ -966,7 +1112,29 @@ def build_community_model(
     reactions_of: Dict[str, Tuple[str, ...]] = {}
     anchor_ids: Dict[str, str] = {}
     transports: List[Tuple["Reaction", str, "Metabolite", "Metabolite"]] = []
-    link_by_base = _bounds_by_base(link_bounds, external_compartment)
+    touched: Dict[Tuple[str, str], set] = {}
+
+    external_of = _external_compartments(units, organisms, external_compartment)
+
+    # Worked out before anything is built, so that a medium can be given
+    # in whatever identifiers the caller has and still be matched against
+    # the metabolites that exist.
+    key_of_metabolite: Dict[str, str] = {}
+    examples: Dict[str, List[str]] = {}
+    for model, organism in zip(units, organisms):
+        outside = external_of[organism]
+        for met in model.metabolites:
+            if met.compartment != outside:
+                continue
+            key = (
+                metabolite_key(met)
+                if metabolite_key is not None
+                else _strip_compartment(met.id, outside)
+            )
+            key_of_metabolite[met.id] = key
+            examples.setdefault(organism, []).append(met.id)
+    link_by_key = _resolve_bounds(link_bounds, key_of_metabolite, "link_bounds")
+    medium_by_key = _resolve_bounds(pool_medium, key_of_metabolite, "pool_medium")
 
     def tag(identifier: str, organism: str) -> str:
         return f"{identifier}{ORGANISM_SEPARATOR}{organism}"
@@ -976,17 +1144,38 @@ def build_community_model(
         # or sink inside the cell is also a boundary reaction by cobrapy's
         # reckoning, and an anchor that only consumes looks exactly like
         # one, so dropping every boundary reaction would delete it.
+        outside = external_of[organism]
         exchanges = {
             rxn.id
             for rxn in model.boundary
-            if any(met.compartment == external_compartment for met in rxn.metabolites)
+            if any(met.compartment == outside for met in rxn.metabolites)
         }
 
         metabolites: Dict[str, "Metabolite"] = {}
         for met in model.metabolites:
-            is_pool_side = mode == SHARED and met.compartment == external_compartment
-            if met.id in untagged or is_pool_side:
-                # One row for the whole community, created once.
+            is_pool_side = mode == SHARED and met.compartment == outside
+            if is_pool_side:
+                # One row for the whole community, found by what the
+                # metabolite is rather than by how this unit spells it,
+                # so two spellings of glucose meet instead of passing.
+                pool = pools_of[organism][0]
+                key = key_of_metabolite[met.id]
+                existing = pooled.get((pool, key))
+                if existing is None:
+                    existing = Metabolite(
+                        met.id,
+                        formula=met.formula,
+                        name=met.name,
+                        charge=met.charge,
+                        compartment=met.compartment,
+                    )
+                    community.add_metabolites([existing])
+                    pooled[(pool, key)] = existing
+                    pool_mets[pool].append(existing.id)
+                touched.setdefault((pool, key), set()).add(organism)
+                metabolites[met.id] = existing
+                continue
+            if met.id in untagged:
                 existing = (
                     community.metabolites.get_by_id(met.id)
                     if met.id in community.metabolites
@@ -1001,10 +1190,6 @@ def build_community_model(
                         compartment=met.compartment,
                     )
                     community.add_metabolites([existing])
-                    if is_pool_side:
-                        pool = pools_of[organism][0]
-                        pooled[(pool, met.id)] = existing
-                        pool_mets[pool].append(met.id)
                 metabolites[met.id] = existing
                 continue
             copied = Metabolite(
@@ -1040,10 +1225,11 @@ def build_community_model(
             # One transport per exchangeable metabolite, per pool the unit
             # belongs to: unit's own external compartment <-> pool.
             for met in model.metabolites:
-                if met.compartment != external_compartment:
+                if met.compartment != outside:
                     continue
-                base = _strip_compartment(met.id, external_compartment)
+                base = key_of_metabolite[met.id]
                 for pool in pools_of[organism]:
+                    touched.setdefault((pool, base), set()).add(organism)
                     if (pool, base) not in pooled:
                         shared_met = Metabolite(
                             f"{base}_{pool}",
@@ -1056,7 +1242,7 @@ def build_community_model(
                         pool_mets[pool].append(shared_met.id)
                         community.add_metabolites([shared_met])
                     shared_met = pooled[(pool, base)]
-                    lower, upper = link_by_base.get(base, (-1000.0, 1000.0))
+                    lower, upper = link_by_key.get(base, (-1000.0, 1000.0))
                     transport = Reaction(
                         tag(f"TR_{shared_met.id}", organism),
                         name=f"{met.name} transport, {organism} to {pool}",
@@ -1077,17 +1263,15 @@ def build_community_model(
             reactions_of[organism] = reactions_of[organism] + (transport.id,)
 
     # The environment, reachable only through an open pool.
-    medium_by_base = _bounds_by_base(pool_medium, external_compartment)
+    key_of_pool_metabolite = {
+        (pool, met.id): key for (pool, key), met in pooled.items()
+    }
     community_exchanges: List[str] = []
     for pool in open_pools:
         for met_id in pool_mets[pool]:
             shared_met = community.metabolites.get_by_id(met_id)
-            base = (
-                _strip_compartment(met_id, external_compartment)
-                if mode == SHARED
-                else met_id[: -(len(pool) + 1)]
-            )
-            lower, upper = medium_by_base.get(base, (0.0, 1000.0))
+            base = key_of_pool_metabolite[(pool, met_id)]
+            lower, upper = medium_by_key.get(base, (0.0, 1000.0))
             exchange = Reaction(
                 f"EX_{shared_met.id}",
                 name=f"{shared_met.name} community exchange",
@@ -1097,6 +1281,8 @@ def build_community_model(
             community.add_reactions([exchange])
             exchange.add_metabolites({shared_met: -1.0})
             community_exchanges.append(exchange.id)
+
+    _report_sharing(pool_members, touched, examples)
 
     missing = [o for o in organisms if anchor_ids[o] not in community.reactions]
     if missing:

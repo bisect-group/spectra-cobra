@@ -147,6 +147,70 @@ The size difference is not cosmetic. A hundred organisms across a thousand
 exchangeable metabolites is a hundred thousand transport reactions in
 ``"pooled"`` and none in ``"shared"``.
 
+Which metabolites are exchangeable
+----------------------------------
+
+Reconstructions do not agree on how to write an extracellular metabolite.
+BiGG says ``glc__D_e``, VMH and AGORA say ``glc_D[e]``, Human-GEM says
+``MAM01965e``. Two questions follow, and they have different answers.
+
+**Which compartment is the outside one?** Worked out per unit, by cobrapy's
+own heuristic: a compartment with a recognised name, else the one carrying
+the most boundary reactions. Per unit, not once for the community, because
+the units need not agree — one model may call it ``e`` and another
+``extracellular``. Override it when you need to:
+
+.. code-block:: python
+
+   build_community_model(..., external_compartment="ext")          # all units
+   build_community_model(..., external_compartment={"A": "e", "B": "ext"})
+
+This step keys off ``met.compartment``, not off the identifier. A model
+whose metabolites carry no compartment at all — some ``.mat`` dumps — will
+have nothing recognised as external, so set them before you build.
+
+**Which metabolites are the same compound?** Two units meet in the pool
+only if their metabolites resolve to the same name. By default the
+compartment is stripped, which resolves ``glc_D_e`` and ``glc_D[e]`` to the
+same ``glc_D``, so the two spellings share one pool row in either mode.
+
+What it cannot do is reconcile identifiers from *different namespaces*.
+``glc__D_e`` and ``glc_D[e]`` are the same molecule under two schemes, and
+no amount of suffix-stripping will tell you so. Left alone that failure is
+silent and total: every unit trades through a pool of its own and nothing
+cross-feeds, with no error anywhere. So the builder checks, and says so:
+
+.. code-block:: text
+
+   WARNING pool 'u' is shared by 2 units but not one metabolite in it is
+   reached by more than one of them, so nothing can cross-feed. The usual
+   cause is identifiers from different namespaces; pass metabolite_key to
+   say how they correspond. Examples: {'A': ['glc__D_e'], 'B': ['glc_D[e]']}
+
+``metabolite_key`` is the way out. Given a metabolite, return the name of
+the thing it *is*:
+
+.. code-block:: python
+
+   import re
+
+   build_community_model(
+       [bigg_model, agora_model],
+       organisms=["A", "B"],
+       metabolite_key=lambda met: re.sub(r"_+D(_e|\[e\])$", "_D", met.id),
+   )
+
+A mapping table from one namespace to the other does the same job and is
+what you want for anything real.
+
+.. tip::
+
+   ``pool_medium`` and ``link_bounds`` are keyed by metabolite identifier
+   as *your* models spell it, and are resolved by looking each one up
+   among the metabolites that exist rather than by stripping suffixes. A
+   name matching nothing is reported rather than silently ignored, which
+   is how you find out a medium file and a model disagree.
+
 A toy community, end to end
 ---------------------------
 
