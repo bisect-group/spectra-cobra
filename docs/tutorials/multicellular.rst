@@ -543,12 +543,53 @@ the union of each tissue's core reactions, tagged:
    tissues = body.with_model(extracted).decompose()
 
 On the four-tissue body above, with ATP maintenance and a maintenance
-biomass reaction core in every tissue, ``minNetLP`` takes 36,180 reactions
-down to 2,584 in about fourteen minutes, keeping all eight core reactions:
+biomass reaction core in every tissue:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 26 20 18 36
+
+   * - Formulation
+     - Reactions
+     - Time
+     - :func:`~spectra_cobra.check_extraction`
+   * - ``minNetLP``
+     - 2,596
+     - 881s
+     - **fails**: 2,292 blocked, 5 of them core
+   * - ``minNetMILP``
+     - **420**
+     - 4,140s
+     - passes: every reaction can carry flux
+
+.. warning::
+
+   Verify a large extraction. ``minNetLP`` returned a model holding all
+   eight core reactions and unable to carry flux through seven of them,
+   and nothing short of :func:`~spectra_cobra.check_extraction` says so --
+   a core reaction being *present* is not the same as its working.
+
+   The cause is in how the two formulations decide what to keep. The
+   mixed-integer one reads it off its own binaries, which is exact. The
+   LP has no binaries, so it infers membership from which reactions carry
+   flux, and at thirty-six thousand reactions that inference breaks: the
+   support of the solution it returns cannot reproduce the fluxes it
+   claims. Shutting every reaction outside that support off *in place*,
+   deleting nothing, reproduces the failure exactly, so this is the
+   solution and not the bookkeeping that follows it.
+
+   It is not inconsistency in the body, either -- 35,416 of its 36,180
+   reactions can carry flux, so ``spectra_ccme`` does not help.
+
+So at this scale prefer ``minNetMILP``, and note that it does not need to
+*finish* to be useful: the run above stopped at its one-hour limit with
+the usual warning that the result may not be minimal, and that unproven
+incumbent is both 84% smaller than the LP's answer and the only one of
+the two that verifies.
 
 .. code-block:: text
 
-   tis1 690   tis2 716   tis3 741   tis4 430     core kept: 8/8
+   tis1 67   tis2 146   tis3 131   tis4 67     core kept: 8/8
 
 ``tis3`` comes back with the most boundary reactions of the four, which is
 what you would hope: it is the only tissue sitting on two pools.
