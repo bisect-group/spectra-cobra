@@ -313,34 +313,47 @@ community model exists to capture.
 Under ``minNetLP`` the objective sums weighted *flux*, and a shared
 exchange carries the flux of every unit drawing on it. Charging for it
 therefore penalises a unit for having company, and the solver responds by
-adding internal reactions so it can take up less. Measured on two hCom
-organisms, this is not a small effect:
+adding internal reactions so that it can take up less. Measured on hCom
+organisms against filling each of them on its own:
 
-.. list-table::
+.. list-table:: Reactions added, ``minNetLP``
    :header-rows: 1
-   :widths: 32 24 22 22
+   :widths: 22 26 26 26
 
-   * - Formulation
-     - ``exchange_weight``
-     - Community
-     - One at a time
-   * - ``minNetMILP``
-     - 1 (default)
-     - **8**
-     - 10
-   * - ``minNetLP``
-     - 1
+   * - Organisms
+     - weight 1
+     - weight 0 (default)
+     - one at a time
+   * - 2
      - 61
-     - 9
-   * - ``minNetLP``
-     - 0 (default)
      - **8**
      - 9
+   * - 4
+     - 89
+     - **17**
+     - 18
+   * - 6
+     - 21
+     - **21**
+     - 31
+
+At weight 0 the community beats filling the members separately at every
+size, and the sequence is orderly. At weight 1 it is erratic, and only
+catches up once there are enough organisms to share the fixed cost of the
+exchanges between them — the pool has one set of them however many units
+there are, so the per-unit charge falls as the community grows. It is also
+slower while it is wrong: 2,931 seconds against 854 at six organisms.
+
+The mixed-integer formulation does not have the problem, because its
+objective counts reactions rather than flux, so an exchange costs the same
+whether one unit uses it or twenty. At two organisms it adds 8 against 10
+filled separately, with the weight left at 1.
 
 So the default follows the formulation: 1 for the MILP, 0 for the LP. Pass
-``exchange_weight`` to override it either way. Note that the published
-pipeline uses 1 throughout; with the mixed-integer formulation it is
-reporting on, that is the right number.
+``exchange_weight`` to override it either way. The published pipeline uses
+1 throughout, and at the scale it reports on — a hundred and four
+organisms, with the mixed-integer formulation — that is the right number.
+It is small communities under the LP where it misleads.
 
 Two more defaults worth knowing. Each unit's anchor reaction is **core**, so
 every unit has to work — otherwise the cheapest community is one where half

@@ -566,8 +566,12 @@ MILP_EXCHANGE_WEIGHT = 1.0
 #: What one costs under ``minNetLP``, which is nothing. That objective
 #: sums weighted *flux*, and a shared exchange carries the flux of every
 #: unit drawing on it, so charging for it penalises a unit for having
-#: company. Measured on two hCom organisms: 61 reactions added at weight
-#: 1 against 8 at weight 0, where the mixed-integer answer is also 8.
+#: company and the solver pays it off by adding internal reactions.
+#: Reactions added on hCom organisms, weight 1 against weight 0, with
+#: filling each organism separately for comparison: 61/8/9 at two
+#: organisms, 89/17/18 at four, 21/21/31 at six. The charge is fixed per
+#: pool however many units share it, so it stops mattering as a community
+#: grows -- but at six organisms it was still three times slower.
 LP_EXCHANGE_WEIGHT = 0.0
 
 
