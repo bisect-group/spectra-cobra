@@ -586,3 +586,38 @@ def test_a_medium_naming_an_absent_metabolite_says_so(solver: str, caplog) -> No
 
     assert "are in no unit and were ignored" in caplog.text
     assert "nosuch_e" in caplog.text
+
+
+def test_a_unit_that_merely_lost_a_tie_is_not_called_inert(solver: str, caplog) -> None:
+    """Maximising every anchor at once lands on one point of a flat face.
+
+    Two units living on the same nutrient can share it in any proportion,
+    so the solver is free to give one of them all of it and the other
+    none. Reporting the loser as dead would be a false alarm, and the
+    reading is only a lower bound, so a zero is always checked again on
+    its own.
+    """
+    with caplog.at_level("WARNING"):
+        community = build_community_model(
+            [_eater("a", "glc_e", solver), _eater("b", "glc_e", solver)],
+            organisms=["A", "B"],
+            pool_medium={"glc_e": (-10.0, 1000.0)},
+            couple=False,
+        )
+
+    assert "inert" not in caplog.text, caplog.text
+    assert min(community.anchor_capacity.values()) > 0.0
+
+
+def test_a_unit_that_really_is_inert_is_reported(solver: str, caplog) -> None:
+    """The contrast: nothing on offer feeds this one at all."""
+    with caplog.at_level("WARNING"):
+        community = build_community_model(
+            [_eater("a", "glc_e", solver), _eater("b", "xyz_e", solver)],
+            organisms=["A", "B"],
+            pool_medium={"glc_e": (-10.0, 1000.0)},
+            couple=False,
+        )
+
+    assert "is inert" in caplog.text
+    assert community.anchor_capacity["B"] == pytest.approx(0.0, abs=1e-9)

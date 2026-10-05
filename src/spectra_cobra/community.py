@@ -929,7 +929,10 @@ def _measure_anchors(
             for organism, rxn_id in anchors.items()
         }
     for organism, rxn_id in anchors.items():
-        if capacity[organism] >= recheck_below:
+        # Zero is always worth a second look, whatever the threshold: it
+        # is the one reading that is reported, and it is also what a unit
+        # shows when it merely lost a tie to another on the same nutrient.
+        if capacity[organism] > 0.0 and capacity[organism] >= recheck_below:
             continue
         with model:
             model.objective = model.reactions.get_by_id(rxn_id)
@@ -1326,10 +1329,11 @@ def build_community_model(
                 continue
             if abs(value) <= 1e-9:
                 logger.warning(
-                    "%s: its anchor %s cannot carry any flux, so the unit is "
-                    "inert and, coupled, will be pinned at zero",
+                    "%s: its anchor %s cannot carry any flux even when "
+                    "maximised on its own, so the unit is inert%s",
                     organism,
                     anchor_ids[organism],
+                    " and, coupled, is pinned at zero" if couple else "",
                 )
             elif couple and coupling_factor * value + coupling_threshold < 1.0:
                 logger.warning(
