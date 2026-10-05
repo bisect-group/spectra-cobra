@@ -621,3 +621,37 @@ def test_a_unit_that_really_is_inert_is_reported(solver: str, caplog) -> None:
 
     assert "is inert" in caplog.text
     assert community.anchor_capacity["B"] == pytest.approx(0.0, abs=1e-9)
+
+
+@pytest.mark.parametrize("problem_type", ["minNetLP", "minNetMILP"])
+def test_a_multi_tissue_model_can_be_extracted_and_split_again(
+    solver: str, problem_type
+) -> None:
+    """The body is a universal model like any other, in either formulation."""
+    from spectra_cobra import build_multi_tissue_model, spectra_me
+
+    gem = _organism("gem", solver, eats="glc", makes="ac")
+    tissues = ["tis1", "tis2", "tis3"]
+    body = build_multi_tissue_model(
+        gem,
+        tissues=tissues,
+        pools={"Bl": ["tis1", "tis2"], "tis2_tis3": ["tis2", "tis3"]},
+        environment=["Bl"],
+        anchor_reactions={t: "biomass" for t in tissues},
+        pool_medium={"glc_e": (-10.0, 1000.0)},
+        couple=False,
+    )
+
+    core = [f"biomass{ORGANISM_SEPARATOR}{t}" for t in tissues]
+    extracted = spectra_me(
+        body.model, core, tol=1e-4, problem_type=problem_type, seed=0
+    )
+
+    assert all(rxn_id in extracted.reactions for rxn_id in core)
+    assert len(extracted.reactions) < len(body.model.reactions)
+
+    parts = body.with_model(extracted).decompose()
+    assert set(parts) == set(tissues)
+    for tissue, part in parts.items():
+        assert "biomass" in part.reactions, tissue
+        assert not [r.id for r in part.reactions if ORGANISM_SEPARATOR in r.id]
