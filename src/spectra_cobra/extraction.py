@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Set, Tuple
 
 import numpy as np
 
+from ._copy import copy_model
 from ._lp import carrying_flux, forward, forward_cc, reverse
 from ._orientation import (
     STOICHIOMETRY,
@@ -448,7 +449,7 @@ def _extract(model: "Model", keep_ids: Set[str], remove_genes: bool) -> "Model":
     would remove the genes regardless.
 
     """
-    extracted = model.copy()
+    extracted = copy_model(model)
     extracted.remove_reactions(
         [rxn.id for rxn in model.reactions if rxn.id not in keep_ids],
         remove_orphans=False,
@@ -848,7 +849,7 @@ def spectra_ccme(
 
     # Further solutions come from spectra_me on the consistent sub-model,
     # excluding the solution just found.
-    consistent = model.copy()
+    consistent = copy_model(model)
     consistent.remove_reactions(sorted(blocked_ids), remove_orphans=True)
     consistent_ids = {rxn.id for rxn in consistent.reactions}
     rest, _ = _spectra_me(

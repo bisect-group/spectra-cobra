@@ -52,6 +52,7 @@ from typing import (
     Union,
 )
 
+from ._copy import copy_model
 from .exceptions import SpectraError
 
 if TYPE_CHECKING:
@@ -250,7 +251,7 @@ class CommunityModel:
                 f"Not organisms of this community: {sorted(unknown)[:5]}."
             )
         dropped = [org for org in self.organisms if org not in wanted]
-        model = self.model.copy()
+        model = copy_model(self.model)
         model.remove_reactions(
             [r for org in dropped for r in self.reactions_of[org]],
             remove_orphans=True,
@@ -355,7 +356,7 @@ class CommunityModel:
         models: Dict[str, "Model"] = {}
         for organism in self.organisms:
             tagged = set(self.reactions_of[organism])
-            extracted = self.model.copy()
+            extracted = copy_model(self.model)
             extracted.remove_reactions(
                 [r.id for r in extracted.reactions if r.id not in tagged],
                 remove_orphans=True,

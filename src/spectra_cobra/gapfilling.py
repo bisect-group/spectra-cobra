@@ -34,6 +34,7 @@ from typing import (
     Union,
 )
 
+from ._copy import copy_model
 from .exceptions import SpectraError, SpectraSolverError
 from .extraction import MIN_NET_LP, MIN_NET_MILP, spectra_me
 
@@ -236,7 +237,7 @@ def _rebuild(universal: "Model", keep: Set[str]) -> "Model":
         The reduced model.
 
     """
-    model = universal.copy()
+    model = copy_model(universal)
     model.remove_reactions(
         sorted({r.id for r in universal.reactions} - keep), remove_orphans=False
     )

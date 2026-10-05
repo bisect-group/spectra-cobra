@@ -71,6 +71,12 @@ Which function do I want?
 * To fill the gaps in a draft reconstruction, so that it can perform a list
   of metabolic tasks or grow in a panel of media, see
   :doc:`tutorials/gapfilling_tasks` and :doc:`tutorials/gapfilling_media`.
+* To model several organisms or tissues that trade metabolites, build one
+  network from them with :doc:`functions/community` and see
+  :doc:`tutorials/multicellular`. Gap-filling them together rather than one
+  at a time is :func:`~spectra_cobra.gapfill_community`.
+* To reduce a community to the smallest membership that still does the job,
+  use :func:`~spectra_cobra.minimal_microbiome`.
 
 Citation
 --------

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
+from ._copy import copy_model
 from ._lp import carrying_flux, forward_cc, reverse
 from ._orientation import (
     STOICHIOMETRY,
@@ -149,7 +150,7 @@ def spectra_cc(
         model, tol, consistency_type, detection_cutoff, seed
     )
 
-    consistent_model = model.copy()
+    consistent_model = copy_model(model)
     consistent_model.remove_reactions(
         [rxn.id for rxn in model.reactions if rxn.id not in consistent_ids],
         remove_orphans=True,

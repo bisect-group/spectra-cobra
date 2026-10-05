@@ -579,7 +579,13 @@ reaction.
    contains a reaction named ``St`` (sulfur diffusion), and ``St`` is the LP
    file format's keyword for the constraint section. optlang copies a Gurobi
    model by writing an LP file and reading it back, so a model holding that
-   reaction produces a file Gurobi cannot parse. Rename it before you start.
+   reaction produces a file Gurobi cannot parse.
+
+   SPECTRA handles it: when a solver cannot serialise itself the model is
+   rebuilt from its dictionary form instead, carrying reactions,
+   metabolites, genes, bounds and GPRs but not the solver, which is then
+   reattached. You will see a warning saying so. Renaming the reaction
+   avoids the detour.
 
 Reference
 ---------
