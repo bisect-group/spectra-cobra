@@ -168,7 +168,63 @@ def _included_reactions(
     """
     if inclusion_cutoff is None:
         inclusion_cutoff = tol * INCLUSION_CUTOFF_FACTOR
-    return {rxn.id for rxn in model.reactions if abs(rxn.flux) >= inclusion_cutoff}
+    included = {rxn.id for rxn in model.reactions if abs(rxn.flux) >= inclusion_cutoff}
+    _warn_on_noisy_support(model, included, tol)
+    return included
+
+
+def _warn_on_noisy_support(model: "Model", included: Set[str], tol: float) -> None:
+    """Warn when the solution's support is partly below solver precision.
+
+    Parameters
+    ----------
+    model : cobra.Model
+        The solved model.
+    included : set of str
+        The reactions the solution is taken to include.
+    tol : float
+        The flux threshold the formulation was given.
+
+    Notes
+    -----
+    A reaction carrying less flux than the solver's own feasibility
+    tolerance is carrying a number the solver cannot distinguish from
+    zero, so its presence in the support says nothing. When enough of
+    the support is like that, the support is not a network: restricting
+    the model to it leaves everything blocked, core reactions included.
+
+    This separates cleanly rather than gradually, which is why it is
+    worth reporting at all. On a two-tissue body of 18,090 reactions at
+    ``tol=1e-4`` with ``model.tolerance=1e-9``, 645 of the 1,269 included
+    reactions were below tolerance and 1,267 of them could not carry
+    flux. At ``tol=1e-3`` the count was zero and the result verified.
+    The cause is the gap between `tol` and the solver's tolerance being
+    too small for the size of the problem, so the remedy is a larger
+    `tol` -- not a different cutoff, which cannot recover information the
+    solution never carried.
+
+    """
+    precision = model.tolerance
+    if not precision:
+        return
+    noisy = sum(
+        1 for rxn in model.reactions if rxn.id in included and abs(rxn.flux) < precision
+    )
+    if not noisy:
+        return
+    logger.warning(
+        "%d of %d reactions in this solution carry less flux than the "
+        "solver can resolve (model.tolerance=%.3g), so whether they belong "
+        "in the model is not something the solution settles. The extracted "
+        "model may be unable to carry flux at all, core reactions included. "
+        "Raise tol (it is %.3g; ten times that usually suffices at this "
+        "size), or use minNetMILP, whose membership comes from its binaries "
+        "rather than from flux. check_extraction will tell you either way.",
+        noisy,
+        len(included),
+        precision,
+        tol,
+    )
 
 
 def _included_from_indicators(

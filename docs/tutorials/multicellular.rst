@@ -547,49 +547,68 @@ biomass reaction core in every tissue:
 
 .. list-table::
    :header-rows: 1
-   :widths: 26 20 18 36
+   :widths: 22 10 16 14 38
 
    * - Formulation
+     - ``tol``
      - Reactions
      - Time
      - :func:`~spectra_cobra.check_extraction`
    * - ``minNetLP``
+     - 1e-4
      - 2,596
      - 881s
      - **fails**: 2,292 blocked, 5 of them core
+   * - ``minNetLP``
+     - 1e-3
+     - 894
+     - 948s
+     - passes
    * - ``minNetMILP``
+     - 1e-4
      - **420**
      - 4,140s
-     - passes: every reaction can carry flux
+     - passes
 
 .. warning::
 
-   Verify a large extraction. ``minNetLP`` returned a model holding all
-   eight core reactions and unable to carry flux through seven of them,
-   and nothing short of :func:`~spectra_cobra.check_extraction` says so --
-   a core reaction being *present* is not the same as its working.
+   ``minNetLP`` needs a larger ``tol`` here than a single organism does,
+   and the usual 1e-4 is not enough. At that value it returned a model
+   holding all eight core reactions and unable to carry flux through
+   seven of them -- and only :func:`~spectra_cobra.check_extraction` says
+   so, because a core reaction being *present* is not the same as its
+   working.
 
-   The cause is in how the two formulations decide what to keep. The
-   mixed-integer one reads it off its own binaries, which is exact. The
-   LP has no binaries, so it infers membership from which reactions carry
-   flux, and at thirty-six thousand reactions that inference breaks: the
-   support of the solution it returns cannot reproduce the fluxes it
-   claims. Shutting every reaction outside that support off *in place*,
-   deleting nothing, reproduces the failure exactly, so this is the
-   solution and not the bookkeeping that follows it.
+   The reason is that an LP infers which reactions it kept from which
+   ones carry flux, and a forced core flux of 1e-4 sits only five orders
+   of magnitude above a solver tolerance of 1e-9. On a body this size the
+   objective drives half the solution into that gap: **645 of the 1,269
+   reactions it kept carried less flux than the solver can resolve**, and
+   1,267 of them turned out to be blocked. Raising ``tol`` to 1e-3 lifts
+   the whole solution clear -- nothing below tolerance, and the result
+   verifies.
 
-   It is not inconsistency in the body, either -- 35,416 of its 36,180
-   reactions can carry flux, so ``spectra_ccme`` does not help.
+   No inclusion cutoff fixes this, because the information was never in
+   the solution; sweeping it from 1e-6 down to zero changes nothing.
+   SPECTRA warns when it sees the condition:
 
-So at this scale prefer ``minNetMILP``, and note that it does not need to
-*finish* to be useful: the run above stopped at its one-hour limit with
-the usual warning that the result may not be minimal, and that unproven
-incumbent is both 84% smaller than the LP's answer and the only one of
-the two that verifies.
+   .. code-block:: text
+
+      WARNING 645 of 1269 reactions in this solution carry less flux than
+      the solver can resolve (model.tolerance=1e-09) ...
+
+   ``minNetMILP`` is immune, because its membership comes from its
+   binaries rather than from flux, and it verifies at ``tol=1e-4``.
+
+So the choice at this scale is between a verified 894 reactions in about
+sixteen minutes and a verified 420 in about seventy. Note also that the
+mixed-integer run did not *finish*: it stopped at its one-hour limit with
+the usual warning that the answer may not be minimal, and that unproven
+incumbent is still less than half the size of the LP's.
 
 .. code-block:: text
 
-   tis1 67   tis2 146   tis3 131   tis4 67     core kept: 8/8
+   tis1 244   tis2 246   tis3 270   tis4 127     core kept: 8/8
 
 ``tis3`` comes back with the most boundary reactions of the four, which is
 what you would hope: it is the only tissue sitting on two pools.

@@ -1,5 +1,7 @@
 """Test the network inference formulations directly."""
 
+from types import SimpleNamespace
+
 import pytest
 from cobra import Model
 
@@ -11,6 +13,7 @@ from spectra_cobra import (
     trade_off,
 )
 from spectra_cobra._orientation import reaction_signs
+from spectra_cobra.formulations import _warn_on_noisy_support
 
 
 def _all_free(model: Model) -> dict:
@@ -459,3 +462,46 @@ def test_trade_off_also_takes_indicator_reactions(toy_model: Model) -> None:
     )
 
     assert solution.selected <= {"R7"}
+
+
+class _Faint:
+    """The least that :func:`_warn_on_noisy_support` needs to read."""
+
+    def __init__(self, tolerance, fluxes):
+        self.tolerance = tolerance
+        self.reactions = [
+            SimpleNamespace(id=rxn_id, flux=flux) for rxn_id, flux in fluxes.items()
+        ]
+
+
+def test_a_support_below_solver_precision_is_reported(caplog) -> None:
+    """A flux the solver cannot resolve says nothing about membership.
+
+    Measured on a two-tissue body of 18,090 reactions: at ``tol=1e-4``
+    against ``model.tolerance=1e-9``, 645 of the 1,269 included reactions
+    carried flux below tolerance, and 1,267 of them turned out unable to
+    carry flux at all. At ``tol=1e-3`` the count was zero and the result
+    verified. The signal is tested here rather than that body, which no
+    unit test can afford to build.
+    """
+    noisy = _Faint(1e-9, {"A": 1e-3, "B": 1e-11, "C": 2e-12})
+    with caplog.at_level("WARNING"):
+        _warn_on_noisy_support(noisy, {"A", "B", "C"}, 1e-4)
+    assert "2 of 3 reactions" in caplog.text
+    assert "carry less flux than the solver can resolve" in caplog.text
+
+
+def test_a_clean_support_is_not_complained_about(caplog) -> None:
+    """The signal has to stay quiet, or it will be ignored when it fires."""
+    clean = _Faint(1e-9, {"A": 1e-3, "B": 1e-5, "C": 1e-8})
+    with caplog.at_level("WARNING"):
+        _warn_on_noisy_support(clean, {"A", "B", "C"}, 1e-4)
+    assert not caplog.text
+
+
+def test_reactions_outside_the_support_do_not_count(caplog) -> None:
+    """Flux below tolerance is only a problem for what was kept."""
+    model = _Faint(1e-9, {"A": 1e-3, "B": 1e-12})
+    with caplog.at_level("WARNING"):
+        _warn_on_noisy_support(model, {"A"}, 1e-4)
+    assert not caplog.text
