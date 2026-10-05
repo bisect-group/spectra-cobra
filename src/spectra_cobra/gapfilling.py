@@ -40,6 +40,7 @@ from .extraction import MIN_NET_LP, MIN_NET_MILP, spectra_me
 if TYPE_CHECKING:
     from cobra.core import Model
 
+    from .community import CommunityModel
     from .tasks import MetabolicTask
 
 
@@ -552,4 +553,285 @@ def gapfill_for_tasks(
         satisfied=tuple(r.task.id for r in outcomes if r.ok),
         unsatisfied=tuple(r.task.id for r in outcomes if not r.ok),
         failed=failed,
+    )
+
+
+#: The weight a community exchange carries unless the caller says
+#: otherwise. Non-zero on purpose: it makes the gap-filler prefer
+#: cross-feeding between units over drawing fresh material from the
+#: medium, which is the point of gap-filling a community rather than its
+#: members one at a time.
+DEFAULT_EXCHANGE_WEIGHT = 1.0
+
+
+@dataclass(frozen=True)
+class CommunityGapfillResult:
+    """What a community gap-fill added, and the model it produced.
+
+    Parameters
+    ----------
+    community : CommunityModel
+        The gap-filled community, with its bookkeeping narrowed to the
+        reactions that survived.
+    added : dict of {str: tuple of str}
+        The reactions each unit took from its database, named as the
+        unit's own model names them.
+    core : tuple of str
+        The reactions the extraction was required to keep.
+    blocked_core : tuple of str
+        Core reactions the consistency check found could not carry flux,
+        and which were therefore not required.
+
+    """
+
+    community: "CommunityModel"
+    added: Dict[str, Tuple[str, ...]]
+    core: Tuple[str, ...] = ()
+    blocked_core: Tuple[str, ...] = ()
+
+    def models(self) -> Dict[str, "Model"]:
+        """Return the gap-filled units as models in their own right.
+
+        Returns
+        -------
+        dict of {str: cobra.Model}
+            One model per unit, untagged, with an exchange wherever the
+            unit met a pool.
+
+        """
+        return self.community.decompose()
+
+    def summary(self) -> str:
+        """Return a one-line account of the result.
+
+        Returns
+        -------
+        str
+            The size of the result and how much was added.
+
+        """
+        total = sum(len(ids) for ids in self.added.values())
+        return (
+            f"{len(self.community.model.reactions)} reactions across "
+            f"{len(self.community.organisms)} units; {total} added"
+            + (
+                f"; {len(self.blocked_core)} core reactions blocked"
+                if self.blocked_core
+                else ""
+            )
+        )
+
+
+def _community_weights(
+    community: "CommunityModel",
+    exchange_weight: float,
+    overrides: Optional[Mapping[str, float]],
+) -> Dict[str, float]:
+    """Return the cost of keeping each reaction of a community.
+
+    Parameters
+    ----------
+    community : CommunityModel
+        The community to weight.
+    exchange_weight : float
+        What a community exchange costs.
+    overrides : mapping, optional
+        Weights to use instead, for any reaction.
+
+    Returns
+    -------
+    dict of {str: float}
+        A weight for every reaction in the model.
+
+    Notes
+    -----
+    What a unit already has costs nothing, so the gap-fill is free to keep
+    all of it; what only its database has costs one, so the solver adds as
+    little as it can. Transports between a unit and a pool cost nothing
+    either: in the other pooling mode the units simply share the
+    compartment, and charging for cross-feeding in one mode but not the
+    other would make the two disagree.
+
+    """
+    free: Set[str] = set()
+    for ids in community.draft_reactions.values():
+        free |= set(ids)
+    transports = {
+        rxn_id
+        for unit in community.organisms
+        for rxn_id in community.reactions_of[unit]
+        if rxn_id.startswith("TR_")
+    }
+    exchanges = set(community.community_exchanges)
+
+    weights: Dict[str, float] = {}
+    for reaction in community.model.reactions:
+        if reaction.id in exchanges:
+            weights[reaction.id] = float(exchange_weight)
+        elif reaction.id in free or reaction.id in transports:
+            weights[reaction.id] = 0.0
+        else:
+            weights[reaction.id] = 1.0
+    weights.update({k: float(v) for k, v in (overrides or {}).items()})
+    return weights
+
+
+def gapfill_community(
+    community: "CommunityModel",
+    core_reactions: Optional[Iterable[str]] = None,
+    anchors_are_core: bool = True,
+    weights: Optional[Mapping[str, float]] = None,
+    exchange_weight: float = DEFAULT_EXCHANGE_WEIGHT,
+    tol: float = 1e-4,
+    problem_type: str = MIN_NET_MILP,
+    consistency_check: bool = True,
+    time_limit: Optional[float] = 300.0,
+    seed: Optional[int] = None,
+) -> CommunityGapfillResult:
+    """Gap-fill every unit of a community at once.
+
+    Parameters
+    ----------
+    community : CommunityModel
+        A community whose units each hold a database of reactions they
+        may draw on, as built by passing `databases` to
+        :func:`~spectra_cobra.build_community_model`.
+    core_reactions : iterable of str, optional
+        Reactions the result must keep, named as the community model
+        names them.
+    anchors_are_core : bool, optional
+        Whether each unit's anchor reaction is required (default True).
+        This is what makes every unit grow rather than only the ones that
+        happen to be cheapest.
+    weights : mapping of {str: float}, optional
+        Weights to use instead of the defaults, for any reaction. The
+        usual reason is sequence evidence: a reaction the organism's
+        genome supports should cost less than one it does not.
+    exchange_weight : float, optional
+        What a community exchange costs (default 1).
+    tol : float, optional
+        The minimum flux a core reaction must carry (default 1e-4).
+    problem_type : {"minNetMILP", "minNetLP"}, optional
+        The formulation (default "minNetMILP"). The LP minimises total
+        weighted flux rather than a count, so it is a relaxation: quick,
+        and usually larger.
+    consistency_check : bool, optional
+        Whether to drop the blocked reactions of the joined model before
+        gap-filling (default True). Worth its cost: a database reaction
+        that cannot carry flux in this community is not a candidate, and
+        removing it shrinks the problem.
+    time_limit : float, optional
+        Seconds to spend on the solve (default 300).
+    seed : int, optional
+        A seed for the extraction's randomised coefficients.
+
+    Returns
+    -------
+    CommunityGapfillResult
+        The gap-filled community, and what each unit took.
+
+    Raises
+    ------
+    SpectraError
+        If a named core reaction is not in the community.
+
+    Notes
+    -----
+    Gap-filling the units together rather than one at a time lets a gap
+    in one be closed by another's secretion instead of by a new reaction,
+    which is why the community result is the smaller one.
+
+    Derived from the community-scale gap-filling of
+
+        S, P. K., Sridhar, S., Alsmadi, N., Mahadevan, R., and Bhatt,
+        N. P. (2026). Generalist method to reconstruct metabolic networks
+        from multi-omics data at large-scale. bioRxiv.
+        https://doi.org/10.64898/2026.04.02.716249
+
+    whose community formulation in turn follows
+
+        Giannari, D., Ho, C. H., and Mahadevan, R. (2021). A gap-filling
+        algorithm for prediction of metabolic interactions in microbial
+        communities. *PLOS Computational Biology*, 17(6), e1009060.
+        https://doi.org/10.1371/journal.pcbi.1009060
+
+    """
+    from .community import ORGANISM_SEPARATOR
+    from .consistency import consistent_reaction_ids
+
+    model = community.model
+    core: Set[str] = set(core_reactions or ())
+    if anchors_are_core:
+        core |= set(community.biomass_reactions.values())
+    unknown = core - {rxn.id for rxn in model.reactions}
+    if unknown:
+        raise SpectraError(
+            f"These core reactions are not in the community model: "
+            f"{sorted(unknown)[:5]}."
+        )
+    all_weights = _community_weights(community, exchange_weight, weights)
+
+    working = community
+    blocked_core: Tuple[str, ...] = ()
+    if consistency_check:
+        keep, _ = consistent_reaction_ids(model, tol=tol)
+        keep = set(keep)
+        logger.info(
+            "consistency check: %d of %d reactions can carry flux",
+            len(keep),
+            len(model.reactions),
+        )
+        blocked_core = tuple(sorted(core - keep))
+        if blocked_core:
+            logger.warning(
+                "%d core reactions cannot carry flux in this community and "
+                "were dropped, for example %s",
+                len(blocked_core),
+                blocked_core[:5],
+            )
+        core &= keep
+        working = community.with_model(_rebuild(model, keep))
+
+    candidates = sorted(
+        rxn_id
+        for rxn_id, weight in all_weights.items()
+        if weight != 0.0 and rxn_id in {r.id for r in working.model.reactions}
+    )
+    logger.info(
+        "gap-filling %d units with %s: %d candidate reactions, %d core",
+        len(working.organisms),
+        problem_type,
+        len(candidates),
+        len(core),
+    )
+    filled = spectra_me(
+        working.model,
+        sorted(core),
+        tol=tol,
+        weights={
+            rxn_id: all_weights[rxn_id]
+            for rxn_id in (r.id for r in working.model.reactions)
+        },
+        problem_type=problem_type,
+        time_limit=time_limit,
+        seed=seed,
+        indicator_reactions=candidates if problem_type == MIN_NET_MILP else None,
+    )
+
+    result = working.with_model(filled)
+    kept = {rxn.id for rxn in filled.reactions}
+    added: Dict[str, Tuple[str, ...]] = {}
+    for unit in community.organisms:
+        suffix = f"{ORGANISM_SEPARATOR}{unit}"
+        taken = sorted(
+            rxn_id[: -len(suffix)] if rxn_id.endswith(suffix) else rxn_id
+            for rxn_id in community.database_reactions.get(unit, ())
+            if rxn_id in kept
+        )
+        added[unit] = tuple(taken)
+    return CommunityGapfillResult(
+        community=result,
+        added=added,
+        core=tuple(sorted(core)),
+        blocked_core=blocked_core,
     )

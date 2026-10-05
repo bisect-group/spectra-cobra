@@ -278,6 +278,55 @@ class CommunityModel:
             coupling_threshold=self.coupling_threshold,
         )
 
+    def with_model(self, model: "Model") -> "CommunityModel":
+        """Return the same community over a reduced model.
+
+        Parameters
+        ----------
+        model : cobra.Model
+            A model holding some subset of this community's reactions,
+            as a consistency check or an extraction leaves behind.
+
+        Returns
+        -------
+        CommunityModel
+            The bookkeeping narrowed to what survived, so that a unit's
+            reactions, its database candidates and the pool exchanges all
+            still name reactions that exist.
+
+        """
+        present = {rxn.id for rxn in model.reactions}
+
+        def kept(mapping):
+            return {
+                unit: tuple(r for r in ids if r in present)
+                for unit, ids in mapping.items()
+            }
+
+        return CommunityModel(
+            model=model,
+            organisms=self.organisms,
+            biomass_reactions=dict(self.biomass_reactions),
+            reactions_of=kept(self.reactions_of),
+            community_exchanges=tuple(
+                r for r in self.community_exchanges if r in present
+            ),
+            mode=self.mode,
+            pools=dict(self.pools),
+            pool_metabolites={
+                pool: tuple(
+                    met for met in mets if met in {m.id for m in model.metabolites}
+                )
+                for pool, mets in self.pool_metabolites.items()
+            },
+            anchor_sources=dict(self.anchor_sources),
+            anchor_capacity=dict(self.anchor_capacity),
+            draft_reactions=kept(self.draft_reactions),
+            database_reactions=kept(self.database_reactions),
+            coupling_factor=self.coupling_factor,
+            coupling_threshold=self.coupling_threshold,
+        )
+
     def decompose(self) -> Dict[str, "Model"]:
         """Split the community back into one model per unit.
 
@@ -1120,11 +1169,16 @@ def build_community_model(
         pool_metabolites={pool: tuple(mets) for pool, mets in pool_mets.items()},
         anchor_sources=anchor_sources,
         anchor_capacity=capacity,
+        # Filtered to what survived the build: a database's exchange
+        # reactions are replaced by transports, so listing them as
+        # candidates would name reactions the model does not have.
         draft_reactions={
-            o: tuple(tag(r, o) for r in ids) for o, ids in draft_of.items()
+            o: tuple(r for r in (tag(i, o) for i in ids) if r in set(reactions_of[o]))
+            for o, ids in draft_of.items()
         },
         database_reactions={
-            o: tuple(tag(r, o) for r in ids) for o, ids in database_of.items()
+            o: tuple(r for r in (tag(i, o) for i in ids) if r in set(reactions_of[o]))
+            for o, ids in database_of.items()
         },
         coupling_factor=coupling_factor if couple else None,
         coupling_threshold=coupling_threshold if couple else None,

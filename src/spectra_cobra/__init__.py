@@ -66,7 +66,9 @@ from .formulations import (
 )
 from .gapfilling import (
     DEFAULT_MIN_GROWTH,
+    CommunityGapfillResult,
     GapfillResult,
+    gapfill_community,
     gapfill_for_growth,
     gapfill_for_tasks,
 )
@@ -106,7 +108,9 @@ __all__ = (
     # Gap-filling.
     "gapfill_for_growth",
     "gapfill_for_tasks",
+    "gapfill_community",
     "GapfillResult",
+    "CommunityGapfillResult",
     "DEFAULT_MIN_GROWTH",
     # Communities.
     "build_community_model",
