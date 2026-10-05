@@ -661,17 +661,48 @@ def _merge_with_database(
     will rarely have beyond its biomass reaction.
 
     """
-    merged = database.copy()
-    merged.id = organism
+    from cobra import Metabolite, Model, Reaction
+
     database_ids = {r.id for r in database.reactions}
     draft_ids = {r.id for r in draft.reactions}
+    bounds = {r.id: r.bounds for r in draft.reactions}
 
-    extra = [r.copy() for r in draft.reactions if r.id not in database_ids]
-    if extra:
-        merged.add_reactions(extra)
-    for reaction in draft.reactions:
-        if reaction.id in database_ids:
-            merged.reactions.get_by_id(reaction.id).bounds = reaction.bounds
+    # Built from fresh objects rather than by copying either model.
+    # cobrapy's copy deep-copies the solver, which for a universal
+    # reconstruction is slow and, on some solvers, simply fails -- and
+    # neither input is modified here, so there is nothing to protect.
+    merged = Model(organism)
+    metabolites: Dict[str, "Metabolite"] = {}
+    for source in (database, draft):
+        for met in source.metabolites:
+            if met.id not in metabolites:
+                metabolites[met.id] = Metabolite(
+                    met.id,
+                    formula=met.formula,
+                    name=met.name,
+                    charge=met.charge,
+                    compartment=met.compartment,
+                )
+    merged.add_metabolites(list(metabolites.values()))
+
+    extra = [r for r in draft.reactions if r.id not in database_ids]
+    copied = []
+    for reaction in list(database.reactions) + extra:
+        lower, upper = bounds.get(reaction.id, reaction.bounds)
+        fresh = Reaction(
+            reaction.id,
+            name=reaction.name,
+            subsystem=reaction.subsystem,
+            lower_bound=lower,
+            upper_bound=upper,
+        )
+        copied.append((fresh, reaction))
+    merged.add_reactions([f for f, _ in copied])
+    for fresh, reaction in copied:
+        fresh.add_metabolites(
+            {metabolites[m.id]: c for m, c in reaction.metabolites.items()}
+        )
+
     objective = [r.id for r in draft.reactions if r.objective_coefficient != 0]
     if len(objective) == 1 and objective[0] in merged.reactions:
         merged.objective = merged.reactions.get_by_id(objective[0])
@@ -1229,11 +1260,10 @@ def build_multi_tissue_model(
     reference model is usually large and copying it correctly matters.
 
     """
-    copies = []
-    for tissue in tissues:
-        copy = model.copy()
-        copy.id = tissue
-        copies.append(copy)
+    # The same model, handed over once per tissue: the builder reads its
+    # inputs and never modifies them, so copying a human reconstruction
+    # five times would only cost time.
+    copies = [model] * len(tissues)
     anchors = (
         {tissue: anchor_reactions[tissue] for tissue in tissues}
         if anchor_reactions

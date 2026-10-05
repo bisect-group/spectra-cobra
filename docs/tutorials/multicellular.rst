@@ -1,0 +1,437 @@
+Multicellular and community models
+==================================
+
+A microbial community and a multi-tissue body are the same construction.
+Several copies of a metabolic network sit side by side, each one tagged so
+its reactions cannot be confused with another's, and they meet somewhere
+they can pass metabolites to each other. What differs between a gut
+community and a human body is which copies meet where, and what the meeting
+place is called.
+
+This page builds one from nothing on a toy, then uses the same routine twice
+at scale: once for a multi-tissue model and once to gap-fill a microbial
+community.
+
+Units, pools and exchanges
+--------------------------
+
+Three words carry the whole design.
+
+A **unit** is one copy of a network: an organism, or a tissue. Everything
+belonging to it gets its identifier as a suffix, so ``PFK`` in unit ``A``
+becomes ``PFK__A``. Units never share a reaction.
+
+A **pool** is a compartment that several units can reach. It is the only
+way one unit's output becomes another's input. A community usually has a
+single pool; a body has several, because the liver and the gut meet the
+blood but the ovary and the granulosa cells also meet each other.
+
+An **exchange** connects a pool to the environment outside the whole system.
+Only the pools you nominate get them. This is deliberate and it matters: a
+pool that exists purely to link two tissues must stay closed, or those two
+could dump metabolites straight out of the system and bypass everything
+else.
+
+Note what has to *go*: each unit's own exchange reactions are removed. A
+draft model has ``EX_glc_e`` so it can eat; leave that in place and every
+unit feeds itself directly from the environment, the pool is decorative, and
+nothing is a community at all.
+
+Two ways to build a pool
+------------------------
+
+``mode="pooled"`` — each unit keeps a private external compartment, and a
+transport reaction carries each metabolite between it and the pool:
+
+.. graphviz::
+   :caption: ``mode="pooled"``. Each unit's own ``glc[e]`` is distinct, and
+             ``TR_`` reactions move glucose into the shared ``glc_u``. The
+             transports belong to a unit, so they can be bounded per unit.
+   :align: center
+
+   digraph pooled {
+     rankdir=LR;
+     bgcolor="transparent";
+     node [fontname="Helvetica", fontsize=10];
+     edge [fontname="Helvetica", fontsize=9, color="#555555", arrowsize=0.7];
+     compound=true;
+
+     node [shape=ellipse, style=filled, fillcolor="#e8f0fa",
+           color="#3c6997", fontcolor="#1b3a57"];
+     glcA [label="glc[e]__A"];
+     glcB [label="glc[e]__B"];
+     node [fillcolor="#fdf0e3", color="#c07d2a", fontcolor="#6b4411"];
+     pool [label="glc_u"];
+
+     node [shape=box, width=0.32, height=0.24, style=filled,
+           fillcolor="#f7f7f7", color="#999999", fontcolor="#333333"];
+     trA [label="TR_glc_u__A"];
+     trB [label="TR_glc_u__B"];
+     ex  [label="EX_glc_u"];
+
+     node [shape=point, width=0.05, color="#bbbbbb"];
+     env;
+
+     subgraph cluster_a {
+       label="unit A"; color="#cccccc"; fontname="Helvetica"; fontsize=9;
+       glcA;
+     }
+     subgraph cluster_b {
+       label="unit B"; color="#cccccc"; fontname="Helvetica"; fontsize=9;
+       glcB;
+     }
+
+     glcA -> trA [dir=both];
+     trA  -> pool [dir=both];
+     glcB -> trB [dir=both];
+     trB  -> pool [dir=both];
+     pool -> ex [dir=both];
+     ex -> env [style=dashed, color="#bbbbbb"];
+   }
+
+``mode="shared"`` — the units share the external compartment itself. One row
+of the stoichiometric matrix per exchangeable metabolite, for the whole
+community, and no transports at all:
+
+.. graphviz::
+   :caption: ``mode="shared"``. There is one ``glc[e]`` and both units use
+             it. Smaller, but there is no per-unit reaction left to bound.
+   :align: center
+
+   digraph shared {
+     rankdir=LR;
+     bgcolor="transparent";
+     node [fontname="Helvetica", fontsize=10];
+     edge [fontname="Helvetica", fontsize=9, color="#555555", arrowsize=0.7];
+
+     node [shape=box, width=0.32, height=0.24, style=filled,
+           fillcolor="#f7f7f7", color="#999999", fontcolor="#333333"];
+     upA [label="UP__A"]; upB [label="UP__B"]; ex [label="EX_glc[e]"];
+
+     node [shape=ellipse, style=filled, fillcolor="#fdf0e3",
+           color="#c07d2a", fontcolor="#6b4411"];
+     pool [label="glc[e]"];
+
+     node [shape=point, width=0.05, color="#bbbbbb"];
+     env;
+
+     pool -> upA [dir=both];
+     pool -> upB [dir=both];
+     pool -> ex [dir=both];
+     ex -> env [style=dashed, color="#bbbbbb"];
+   }
+
+Which to use:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 28 36 36
+
+   * -
+     - ``"pooled"``
+     - ``"shared"``
+   * - pools
+     - as many as you like
+     - exactly one
+   * - per-unit bounds on what crosses
+     - yes, through ``link_bounds``
+     - no reaction to bound
+   * - size
+     - one transport per unit per metabolite
+     - nothing extra
+   * - use it for
+     - tissues, measured uptake rates
+     - large communities
+
+The size difference is not cosmetic. A hundred organisms across a thousand
+exchangeable metabolites is a hundred thousand transport reactions in
+``"pooled"`` and none in ``"shared"``.
+
+A toy community, end to end
+---------------------------
+
+A four-step chain, ``glc → a → b → c``, with an anchor that consumes ``c``.
+Two drafts each hold part of it:
+
+.. graphviz::
+   :caption: ``A`` can reach ``b`` and export it but cannot finish; ``B``
+             can finish but cannot start. Dashed reactions are the ones
+             each draft is missing.
+   :align: center
+
+   digraph chain {
+     rankdir=LR;
+     bgcolor="transparent";
+     node [fontname="Helvetica", fontsize=10];
+     edge [fontname="Helvetica", fontsize=9, color="#555555", arrowsize=0.7];
+
+     node [shape=ellipse, style=filled, fillcolor="#e8f0fa",
+           color="#3c6997", fontcolor="#1b3a57"];
+     glc; a; b; c;
+
+     node [shape=box, width=0.3, height=0.22, style=filled,
+           fillcolor="#f7f7f7", color="#999999", fontcolor="#333333"];
+     UP; R1; R2; BIO;
+
+     glc -> UP -> a -> R1 -> b -> R2 -> c -> BIO;
+     b -> EXP [label=" to the pool", fontcolor="#c07d2a"];
+     EXP [shape=box, width=0.3, height=0.22, style=filled,
+          fillcolor="#fdf0e3", color="#c07d2a", fontcolor="#6b4411"];
+   }
+
+Build the community. Each unit is backed by a *database* — everything it is
+allowed to borrow — and its own draft supplies the bounds:
+
+.. code-block:: python
+
+   from spectra_cobra import build_community_model
+
+   community = build_community_model(
+       [draft_a, draft_b],
+       organisms=["A", "B"],
+       databases={"A": chain, "B": chain},
+       pool_medium={"glc_e": (-10.0, 1000.0)},
+   )
+
+   community.database_reactions["A"]   # ('R2__A',)
+   community.database_reactions["B"]   # ('UP__B', 'R1__B')
+
+``pool_medium`` is what the environment offers, keyed by metabolite as your
+own models spell it. Everything unnamed stays shut to uptake.
+
+Now fill the gaps in both at once:
+
+.. code-block:: python
+
+   from spectra_cobra import gapfill_community
+
+   result = gapfill_community(community, problem_type="minNetMILP")
+
+   result.added        # {'A': ('R2',), 'B': ()}
+   result.models()     # one untagged cobra model per unit
+
+``B`` borrows nothing. What it was missing arrives from ``A`` through the
+pool. ``A`` still needs its one reaction, because it has to feed itself
+whatever ``B`` does. Filling the two separately costs three reactions
+instead of one — and that gap is the entire argument for doing it this way.
+
+What the gap-filler charges for
+-------------------------------
+
+================================  ======  =========================
+Reaction                          Weight  Why
+================================  ======  =========================
+already in the unit's draft       0       it is not an addition
+only in the unit's database       1       this is what is being counted
+transport into a pool             0       free in ``"shared"`` mode too
+community exchange                1       prefer trading over importing
+================================  ======  =========================
+
+The exchange weight is the interesting one. Charging for an exchange makes
+the solver reach for a neighbour's secretion before it reaches for fresh
+material from the medium, which is the behaviour a community model is built
+to capture. Pass ``exchange_weight=0.0`` to turn that off.
+
+Two more defaults worth knowing. Each unit's anchor reaction is **core**, so
+every unit has to work — otherwise the cheapest community is one where half
+the members are dead. And ``keep_draft=True`` keeps every reaction a unit
+already had: the formulation returns the *smallest network* meeting the
+requirement, which left to itself would throw away parts of the draft that
+carry no flux under this particular medium. Gap-filling adds; it should not
+quietly subtract.
+
+Coupling, and what a unit is gated on
+-------------------------------------
+
+An absent unit must be absent in full. Not merely not growing — carrying no
+flux at all. Otherwise a dead organism goes on running its metabolism and
+feeding its neighbours for free.
+
+That is what coupling does. For every reaction of a unit,
+
+.. math::
+
+   |v_i| \le c \cdot v_{\text{anchor}} + u
+
+so a reaction can carry flux only in proportion to its unit's **anchor**.
+The defaults, :math:`c = 1000` and :math:`u = 0.01`, are the published
+values for a microbial community whose anchor is biomass.
+
+Which reaction is the anchor is decided in this order, and never guessed
+past it:
+
+1. what you passed in ``biomass_reactions``,
+2. the model's objective, if exactly one reaction is in it,
+3. a single reaction named ``biomass*``,
+4. otherwise it refuses, and tells you what the candidates looked like.
+
+Refusing matters. A tissue is rarely growing, so its anchor is usually ATP
+maintenance or a demand reaction with no telling name, and coupling ten
+thousand reactions to the wrong one would throttle or free the whole tissue
+without raising anything.
+
+Whatever is chosen is reported:
+
+.. code-block:: python
+
+   print(community.coupling_summary())
+
+.. code-block:: text
+
+   unit    anchor                  how          capacity        cap
+   tis1    DM_atp_c___tis1         given             10.0      1e+04
+   tis2    DM_atp_c___tis2         given           0.0001       0.11
+
+``capacity`` is the most that anchor can carry; ``cap`` is what the coupling
+then permits every reaction in the unit. The second row is the failure to
+watch for. An anchor running at 1e-4 with :math:`c = 1000` caps the whole
+tissue at 0.11, which strangles it silently. The builder warns when it sees
+this.
+
+.. note::
+
+   :math:`c` is not a number to be derived; it is a modelling choice about
+   how much flux a unit may carry per unit of anchor. If your anchor runs at
+   a different scale from a bacterial growth rate, raise :math:`c` to match
+   it, or pass ``couple=False`` and do without.
+
+A multi-tissue model
+--------------------
+
+Tissues need the ``"pooled"`` mode, for two reasons: they do not all meet in
+the same place, and measured uptake rates attach to the transports.
+
+Suppose three tissues. ``tis1`` and ``tis2`` are perfused by blood; ``tis3``
+only ever meets ``tis2``:
+
+.. graphviz::
+   :caption: Two pools. ``Bl`` reaches the environment; the ``tis2_tis3``
+             interface does not, so ``tis3`` lives entirely on what
+             ``tis2`` passes it.
+   :align: center
+
+   digraph tissues {
+     rankdir=LR;
+     bgcolor="transparent";
+     node [fontname="Helvetica", fontsize=10];
+     edge [fontname="Helvetica", fontsize=9, color="#555555", arrowsize=0.7,
+           dir=both];
+
+     node [shape=box, style="filled,rounded", fillcolor="#e8f0fa",
+           color="#3c6997", fontcolor="#1b3a57"];
+     tis1; tis2; tis3;
+
+     node [shape=ellipse, style=filled, fillcolor="#fdf0e3",
+           color="#c07d2a", fontcolor="#6b4411"];
+     Bl [label="Bl"]; iface [label="tis2_tis3"];
+
+     node [shape=point, width=0.05, color="#bbbbbb"];
+     env;
+
+     tis1 -> Bl; tis2 -> Bl;
+     tis2 -> iface; tis3 -> iface;
+     Bl -> env [style=dashed, color="#bbbbbb", label=" exchanges"];
+   }
+
+.. code-block:: python
+
+   from spectra_cobra import build_multi_tissue_model
+
+   body = build_multi_tissue_model(
+       gem,
+       tissues=["tis1", "tis2", "tis3"],
+       pools={"Bl": ["tis1", "tis2"], "tis2_tis3": ["tis2", "tis3"]},
+       environment=["Bl"],
+       anchor_reactions={t: "DM_atp_c_" for t in ("tis1", "tis2", "tis3")},
+       pool_medium=blood_medium,
+       link_bounds=measured_rates,
+       couple=False,
+   )
+
+Four things to notice.
+
+``environment=["Bl"]`` is required, not optional. With more than one pool
+the builder will not guess, because guessing "all of them" would give the
+``tis2_tis3`` interface its own exchanges and let those two tissues bypass
+the blood entirely.
+
+``anchor_reactions`` names ATP maintenance. A tissue is not growing, so
+there is no biomass reaction to find.
+
+``link_bounds`` is where blood metabolomics goes. It bounds the transport
+between a tissue and a pool — *this tissue may take up at most this much* —
+which is a different statement from ``pool_medium``, which says what the
+blood contains at all.
+
+``couple=False`` here. With an anchor running at maintenance rates the
+default :math:`c` would throttle every tissue; either raise :math:`c` to
+suit the anchor or leave the coupling off. Build it, read
+``coupling_summary()``, and decide with the numbers in front of you.
+
+The reference network is read, never modified, and never copied: the same
+model is handed over once per tissue, so a five-tissue human model costs no
+more memory than a one-tissue one.
+
+Extracting context-specific tissues
+-----------------------------------
+
+A multi-tissue model is a universal model like any other, so
+:func:`~spectra_cobra.spectra_me` extracts from it directly. The core set is
+the union of each tissue's core reactions, tagged:
+
+.. code-block:: python
+
+   from spectra_cobra import spectra_me
+
+   core = [f"{rxn}__{tissue}" for tissue, rxns in cores.items() for rxn in rxns]
+   extracted = spectra_me(body.model, core, tol=1e-4, problem_type="minNetLP")
+
+   tissues = body.with_model(extracted).decompose()
+
+``decompose`` hands each tissue back as a model in its own right, untagged,
+with an exchange reaction wherever it met a pool — a transport ``x[e] → x_u``
+with the pool side dropped *is* an exchange, and it keeps the transport's
+bounds, so the measured rates survive the round trip.
+
+Community gap-filling at genome scale
+-------------------------------------
+
+The published case study gap-fills the hCom synthetic gut community against
+CarveMe's universal reconstructions. Each organism's compartment holds an
+entire universal — the Gram-positive, Gram-negative or common one, by Gram
+stain — bounded by its own draft wherever the two agree. The organisms share
+the extracellular compartment, constrained by the standard amino acid
+complete (SAAC) medium.
+
+.. code-block:: python
+
+   community = build_community_model(
+       drafts,
+       organisms=names,
+       mode="shared",
+       databases={name: universal_for[name] for name in names},
+       pool_medium=saac,
+       couple=False,
+   )
+
+   result = gapfill_community(community, tol=1e-5, problem_type="minNetLP")
+
+``couple=False`` because the requirement here is carried by the biomass
+bound, not by the coupling: the published pipeline floors biomass and ATP
+maintenance at 0.1 so that both are kept, and makes biomass the only core
+reaction.
+
+.. note::
+
+   One practical snag, and it is not SPECTRA's. The CarveMe universal
+   contains a reaction named ``St`` (sulfur diffusion), and ``St`` is the LP
+   file format's keyword for the constraint section. optlang copies a Gurobi
+   model by writing an LP file and reading it back, so a model holding that
+   reaction produces a file Gurobi cannot parse. Rename it before you start.
+
+Reference
+---------
+
+* :doc:`../functions/community` — the builder and the minimal microbiome
+* :doc:`../functions/gapfilling` — ``gapfill_community`` and its siblings
+* :doc:`minimal_microbiome` — reducing a community instead of filling it

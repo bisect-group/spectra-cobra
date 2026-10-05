@@ -55,7 +55,8 @@ What is in the package
    * - :doc:`functions/gapfilling`
      - Fills the gaps in a draft, towards growth or towards tasks
    * - :doc:`functions/community`
-     - Joins organism models, and reduces a community to a minimal one
+     - Joins models into a community or a body, and reduces a community
+       to a minimal one
 
 Which function do I want?
 -------------------------
@@ -109,6 +110,7 @@ Citation
    tutorials/topology
    tutorials/gapfilling_tasks
    tutorials/gapfilling_media
+   tutorials/multicellular
    tutorials/minimal_microbiome
    tutorials/recon3d
 

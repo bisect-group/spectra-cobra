@@ -187,3 +187,17 @@ def test_without_core_anchors_a_unit_can_be_left_out(community) -> None:
     assert (
         sum(len(ids) for ids in result.added.values()) == 0
     ), "with nothing required, the cheapest community adds nothing at all"
+
+
+def test_keep_draft_retains_what_the_solution_does_not_use(community) -> None:
+    """Gap-filling adds; it must not quietly subtract."""
+    kept = gapfill_community(community, seed=0)
+    lean = gapfill_community(community, keep_draft=False, seed=0)
+
+    drafted = {r for ids in community.draft_reactions.values() for r in ids}
+    present = {r.id for r in kept.community.model.reactions}
+    assert drafted <= present, "every draft reaction should survive"
+
+    trimmed = {r.id for r in lean.community.model.reactions}
+    assert len(trimmed) <= len(present)
+    assert lean.added == kept.added, "what was borrowed does not change"

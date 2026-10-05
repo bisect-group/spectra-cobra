@@ -1,38 +1,59 @@
-Communities and minimal microbiomes
-===================================
+Communities, tissues and minimal microbiomes
+============================================
 
-:func:`~spectra_cobra.build_community_model` joins organism models into a
-community that trades through a shared pool.
-:func:`~spectra_cobra.minimal_microbiome` reduces such a community to the
+:func:`~spectra_cobra.build_community_model` joins models into one network
+whose parts trade through a pool. The parts may be organisms of a community
+or tissues of a body; nothing in the construction distinguishes them.
+:func:`~spectra_cobra.build_multi_tissue_model` is the same routine with one
+reference network replicated for you.
+:func:`~spectra_cobra.minimal_microbiome` reduces a community to the
 smallest subset that still does the job.
 
-Building a community
---------------------
+:doc:`../tutorials/multicellular` builds all of this up from a toy and
+explains pools, transports, exchanges and coupling. This page is the
+reference.
+
+At a glance
+-----------
 
 .. code-block:: python
 
    from spectra_cobra import build_community_model
 
    community = build_community_model([model_a, model_b], organisms=["A", "B"])
-   community.model            # the joined cobra model
-   community.organisms        # ("A", "B")
-   community.biomass_reactions  # {"A": "biomass__A", ...}
+   community.model               # the joined cobra model
+   community.biomass_reactions   # {"A": "biomass__A", ...}
+   community.decompose()         # back to one model per unit
+   print(community.coupling_summary())
 
-Each organism keeps its own external compartment; a transport links it to
-the shared pool, and one community exchange connects the pool to the
-environment. A metabolite therefore moves organism → pool → organism, which
-is what makes cross-feeding possible.
+The inputs are read, never modified and never copied.
 
-Two details carry the weight.
+Choosing the arguments
+----------------------
 
-**The organisms' own exchanges are replaced, not kept.** Leaving them in
-would let every organism draw on the environment directly, and no amount of
-community structure would constrain anything.
+.. list-table::
+   :header-rows: 1
+   :widths: 24 76
 
-**Every reaction is coupled to its organism's biomass**, so an organism that
-is not growing carries no flux at all. Without it a dead producer goes on
-feeding its neighbours for free, which the test suite checks by building a
-community both ways.
+   * - Argument
+     - Reach for it when
+   * - ``mode``
+     - ``"shared"`` for a large community; ``"pooled"`` when units must
+       meet in different places or you have per-unit rates to impose
+   * - ``pools``
+     - the units do not all meet in one place
+   * - ``environment``
+     - required as soon as there is more than one pool
+   * - ``databases``
+     - the units are drafts to be gap-filled against a universal model
+   * - ``pool_medium``
+     - what the environment supplies
+   * - ``link_bounds``
+     - you have measured uptake or secretion rates per unit
+   * - ``biomass_reactions``
+     - the anchor is not the objective and is not named ``biomass*``
+   * - ``couple``
+     - leave on for organisms; think first for tissues
 
 Finding a minimal microbiome
 ----------------------------
@@ -49,8 +70,8 @@ This is the extraction machinery pointed at organisms instead of reactions.
 Each organism's biomass reaction gets a binary through
 ``indicator_reactions`` and a weight of 1, everything else is weighted 0,
 and minimising the weighted count becomes minimising the number of
-organisms. The biomass coupling supplies the rest: an organism whose binary
-is off cannot grow, and so does nothing.
+organisms. The coupling supplies the rest: an organism whose binary is off
+cannot grow, and so does nothing.
 
 The growth and production requirements are constraints rather than part of
 the objective, and they are *measured before they are imposed*: the full
@@ -72,6 +93,8 @@ Reference
 
 .. autofunction:: spectra_cobra.build_community_model
 
+.. autofunction:: spectra_cobra.build_multi_tissue_model
+
 .. autoclass:: spectra_cobra.CommunityModel
    :members:
 
@@ -83,5 +106,7 @@ Reference
 See also
 --------
 
+* :doc:`../tutorials/multicellular` — the worked explanation
+* :doc:`gapfilling` — filling the gaps in every unit at once
 * :doc:`spectra_me` — the extraction this is built on
 * :doc:`formulations` — ``indicator_reactions`` and what it changes

@@ -167,11 +167,14 @@ That is a necessary condition and not a sufficient one — a task with
 alternative routes has no essential reactions — so `gapfill_for_tasks`
 follows up task by task on whatever still fails.
 
-## Communities and minimal microbiomes
+## Communities, tissues and minimal microbiomes
 
-`build_community_model` joins organism models into a community trading
-through a shared pool, with every reaction coupled to its organism's biomass
-so an absent organism carries no flux at all.
+`build_community_model` joins models into one network whose parts trade
+through a **pool**. The parts may be organisms of a community or tissues of
+a body — nothing in the construction distinguishes them. Each unit's own
+exchange reactions are replaced, so the only way out is through a pool you
+nominate, and each unit's reactions are coupled to an **anchor** so a unit
+that is not working carries no flux at all.
 
 ```python
 from spectra_cobra import build_community_model, minimal_microbiome
@@ -180,6 +183,28 @@ community = build_community_model([a, b, c], organisms=["A", "B", "C"])
 result = minimal_microbiome(community, products=["EX_but_u"])
 print(result.present, result.membership)
 ```
+
+A body needs several pools, and which of them reach the environment has to
+be said: a pool that merely links two tissues must stay closed, or those
+two could bypass the blood entirely.
+
+```python
+from spectra_cobra import build_multi_tissue_model, gapfill_community
+
+body = build_multi_tissue_model(
+    gem,
+    tissues=["tis1", "tis2", "tis3"],
+    pools={"Bl": ["tis1", "tis2"], "tis2_tis3": ["tis2", "tis3"]},
+    environment=["Bl"],
+    anchor_reactions={t: "DM_atp_c_" for t in ("tis1", "tis2", "tis3")},
+    link_bounds=measured_rates,   # per-tissue uptake, from metabolomics
+)
+print(body.coupling_summary())    # what each tissue got coupled to
+```
+
+`gapfill_community` then fills every unit in one solve, so a gap in one can
+be closed by another's secretion instead of by a new reaction. That is why
+the joint answer is smaller than filling the members one at a time.
 
 `minimal_microbiome` is the `minNetMILP` formulation pointed at organisms:
 each biomass reaction gets a binary through `indicator_reactions` and a

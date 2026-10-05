@@ -685,6 +685,7 @@ def gapfill_community(
     tol: float = 1e-4,
     problem_type: str = MIN_NET_MILP,
     consistency_check: bool = True,
+    keep_draft: bool = True,
     time_limit: Optional[float] = 300.0,
     seed: Optional[int] = None,
 ) -> CommunityGapfillResult:
@@ -720,6 +721,12 @@ def gapfill_community(
         gap-filling (default True). Worth its cost: a database reaction
         that cannot carry flux in this community is not a candidate, and
         removing it shrinks the problem.
+    keep_draft : bool, optional
+        Whether to keep every reaction a unit already had, whether or not
+        the solution uses it (default True). This is what separates
+        gap-filling from extraction: the formulation returns the smallest
+        network that meets the requirement, which would otherwise throw
+        away parts of the draft that carry no flux under this one medium.
     time_limit : float, optional
         Seconds to spend on the solve (default 300).
     seed : int, optional
@@ -818,8 +825,23 @@ def gapfill_community(
         indicator_reactions=candidates if problem_type == MIN_NET_MILP else None,
     )
 
-    result = working.with_model(filled)
     kept = {rxn.id for rxn in filled.reactions}
+    if keep_draft:
+        present = {rxn.id for rxn in working.model.reactions}
+        drafted = {
+            rxn_id
+            for ids in working.draft_reactions.values()
+            for rxn_id in ids
+            if rxn_id in present
+        }
+        logger.info(
+            "keeping %d draft reactions the solution does not use",
+            len(drafted - kept),
+        )
+        kept |= drafted
+        result = working.with_model(_rebuild(working.model, kept))
+    else:
+        result = working.with_model(filled)
     added: Dict[str, Tuple[str, ...]] = {}
     for unit in community.organisms:
         suffix = f"{ORGANISM_SEPARATOR}{unit}"
