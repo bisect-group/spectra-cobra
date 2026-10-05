@@ -482,6 +482,37 @@ The reference network is read, never modified, and never copied: the same
 model is handed over once per tissue, so a five-tissue human model costs no
 more memory than a one-tissue one.
 
+What that comes to, on a real reconstruction
+--------------------------------------------
+
+Four tissues on a consistent Recon3D, three on the blood and a fourth
+reachable only through the third:
+
+.. code-block:: text
+
+   body: 36180 reactions, 20552 metabolites        (28s)
+     pool Bl:        ['tis1', 'tis2', 'tis3'], 880 metabolites
+     pool tis3_tis4: ['tis3', 'tis4'],         880 metabolites
+     community exchanges: 880
+     transports:         4400
+
+4,400 is 880 × 3 for the blood plus 880 × 2 for the interface. The 880
+exchanges are all on ``Bl``, because that is the only pool nominated.
+
+The test that the topology is really doing something:
+
+.. code-block:: text
+
+   whole-body objective:       21.3061
+   tis4 alone:                 21.3061
+   tis4 with tis3 shut down:   0
+
+``tis4`` touches no open pool, so everything it eats comes through the
+interface from ``tis3``. Shut ``tis3`` down and ``tis4`` goes to exactly
+zero. Had the interface been given exchanges of its own — which is what
+defaulting ``environment`` to every pool would have done — ``tis4`` would
+have carried on regardless and nothing would have looked wrong.
+
 Extracting context-specific tissues
 -----------------------------------
 
@@ -497,6 +528,17 @@ the union of each tissue's core reactions, tagged:
    extracted = spectra_me(body.model, core, tol=1e-4, problem_type="minNetLP")
 
    tissues = body.with_model(extracted).decompose()
+
+On the four-tissue body above, with ATP maintenance and a maintenance
+biomass reaction core in every tissue, ``minNetLP`` takes 36,180 reactions
+down to 2,584 in about fourteen minutes, keeping all eight core reactions:
+
+.. code-block:: text
+
+   tis1 690   tis2 716   tis3 741   tis4 430     core kept: 8/8
+
+``tis3`` comes back with the most boundary reactions of the four, which is
+what you would hope: it is the only tissue sitting on two pools.
 
 ``decompose`` hands each tissue back as a model in its own right, untagged,
 with an exchange reaction wherever it met a pool — a transport ``x[e] → x_u``
