@@ -282,19 +282,65 @@ instead of one — and that gap is the entire argument for doing it this way.
 What the gap-filler charges for
 -------------------------------
 
-================================  ======  =========================
-Reaction                          Weight  Why
-================================  ======  =========================
-already in the unit's draft       0       it is not an addition
-only in the unit's database       1       this is what is being counted
-transport into a pool             0       free in ``"shared"`` mode too
-community exchange                1       prefer trading over importing
-================================  ======  =========================
+.. list-table::
+   :header-rows: 1
+   :widths: 44 22 34
 
-The exchange weight is the interesting one. Charging for an exchange makes
-the solver reach for a neighbour's secretion before it reaches for fresh
-material from the medium, which is the behaviour a community model is built
-to capture. Pass ``exchange_weight=0.0`` to turn that off.
+   * - Reaction
+     - Weight
+     - Why
+   * - already in the unit's draft
+     - 0
+     - it is not an addition
+   * - only in the unit's database
+     - 1
+     - this is what is counted
+   * - transport into a pool
+     - 0
+     - free in ``"shared"`` mode too
+   * - community exchange
+     - depends
+     - see below
+
+The exchange weight is the interesting one, and it is the one place where
+the two formulations must be told apart.
+
+Under ``minNetMILP`` the objective counts reactions, so charging 1 for an
+exchange makes the solver reach for a neighbour's secretion before it
+reaches for fresh material from the medium — exactly the behaviour a
+community model exists to capture.
+
+Under ``minNetLP`` the objective sums weighted *flux*, and a shared
+exchange carries the flux of every unit drawing on it. Charging for it
+therefore penalises a unit for having company, and the solver responds by
+adding internal reactions so it can take up less. Measured on two hCom
+organisms, this is not a small effect:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 32 24 22 22
+
+   * - Formulation
+     - ``exchange_weight``
+     - Community
+     - One at a time
+   * - ``minNetMILP``
+     - 1 (default)
+     - **8**
+     - 10
+   * - ``minNetLP``
+     - 1
+     - 61
+     - 9
+   * - ``minNetLP``
+     - 0 (default)
+     - **8**
+     - 9
+
+So the default follows the formulation: 1 for the MILP, 0 for the LP. Pass
+``exchange_weight`` to override it either way. Note that the published
+pipeline uses 1 throughout; with the mixed-integer formulation it is
+reporting on, that is the right number.
 
 Two more defaults worth knowing. Each unit's anchor reaction is **core**, so
 every unit has to work — otherwise the cheapest community is one where half

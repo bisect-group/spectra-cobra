@@ -25,7 +25,12 @@ from spectra_cobra import (
     build_community_model,
     spectra_me,
 )
-from spectra_cobra.gapfilling import gapfill_community
+from spectra_cobra.gapfilling import (
+    LP_EXCHANGE_WEIGHT,
+    MILP_EXCHANGE_WEIGHT,
+    _exchange_weight,
+    gapfill_community,
+)
 
 #: Every reaction of the chain, as (id, {metabolite: coefficient}).
 CHAIN = {
@@ -201,3 +206,18 @@ def test_keep_draft_retains_what_the_solution_does_not_use(community) -> None:
     trimmed = {r.id for r in lean.community.model.reactions}
     assert len(trimmed) <= len(present)
     assert lean.added == kept.added, "what was borrowed does not change"
+
+
+@pytest.mark.parametrize(
+    "problem_type, expected",
+    [(MIN_NET_MILP, MILP_EXCHANGE_WEIGHT), (MIN_NET_LP, LP_EXCHANGE_WEIGHT)],
+)
+def test_the_exchange_weight_follows_the_formulation(problem_type, expected) -> None:
+    """An LP sums flux, so it must not be charged per unit sharing a pool.
+
+    Measured on two hCom organisms: weighting community exchanges 1 under
+    ``minNetLP`` adds 61 reactions where weighting them 0 adds 8, which is
+    also what the mixed-integer answer comes to.
+    """
+    assert _exchange_weight(None, problem_type) == expected
+    assert _exchange_weight(0.5, problem_type) == 0.5

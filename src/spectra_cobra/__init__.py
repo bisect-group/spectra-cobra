@@ -66,6 +66,8 @@ from .formulations import (
 )
 from .gapfilling import (
     DEFAULT_MIN_GROWTH,
+    LP_EXCHANGE_WEIGHT,
+    MILP_EXCHANGE_WEIGHT,
     CommunityGapfillResult,
     GapfillResult,
     gapfill_community,
@@ -111,6 +113,8 @@ __all__ = (
     "gapfill_community",
     "GapfillResult",
     "CommunityGapfillResult",
+    "MILP_EXCHANGE_WEIGHT",
+    "LP_EXCHANGE_WEIGHT",
     "DEFAULT_MIN_GROWTH",
     # Communities.
     "build_community_model",

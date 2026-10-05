@@ -556,12 +556,44 @@ def gapfill_for_tasks(
     )
 
 
-#: The weight a community exchange carries unless the caller says
-#: otherwise. Non-zero on purpose: it makes the gap-filler prefer
-#: cross-feeding between units over drawing fresh material from the
-#: medium, which is the point of gap-filling a community rather than its
-#: members one at a time.
-DEFAULT_EXCHANGE_WEIGHT = 1.0
+#: What a community exchange costs under ``minNetMILP``. Non-zero on
+#: purpose: the objective counts reactions, so charging for an exchange
+#: makes the gap-filler prefer a neighbour's secretion over fresh material
+#: from the medium, which is the point of filling a community at all.
+MILP_EXCHANGE_WEIGHT = 1.0
+
+#: What one costs under ``minNetLP``, which is nothing. That objective
+#: sums weighted *flux*, and a shared exchange carries the flux of every
+#: unit drawing on it, so charging for it penalises a unit for having
+#: company. Measured on two hCom organisms: 61 reactions added at weight
+#: 1 against 8 at weight 0, where the mixed-integer answer is also 8.
+LP_EXCHANGE_WEIGHT = 0.0
+
+
+def _exchange_weight(given: Optional[float], problem_type: str) -> float:
+    """Return what a community exchange should cost.
+
+    Parameters
+    ----------
+    given : float, optional
+        The caller's choice, or None to take the default for the
+        formulation.
+    problem_type : str
+        The formulation being used.
+
+    Returns
+    -------
+    float
+        The weight.
+
+    """
+    if given is not None:
+        return float(given)
+    weight = LP_EXCHANGE_WEIGHT if problem_type == MIN_NET_LP else MILP_EXCHANGE_WEIGHT
+    logger.info(
+        "community exchanges weighted %g, the default for %s", weight, problem_type
+    )
+    return weight
 
 
 @dataclass(frozen=True)
@@ -681,7 +713,7 @@ def gapfill_community(
     core_reactions: Optional[Iterable[str]] = None,
     anchors_are_core: bool = True,
     weights: Optional[Mapping[str, float]] = None,
-    exchange_weight: float = DEFAULT_EXCHANGE_WEIGHT,
+    exchange_weight: Optional[float] = None,
     tol: float = 1e-4,
     problem_type: str = MIN_NET_MILP,
     consistency_check: bool = True,
@@ -709,7 +741,10 @@ def gapfill_community(
         usual reason is sequence evidence: a reaction the organism's
         genome supports should cost less than one it does not.
     exchange_weight : float, optional
-        What a community exchange costs (default 1).
+        What a community exchange costs. Left out, it depends on the
+        formulation: 1 for ``minNetMILP``, which counts reactions, and 0
+        for ``minNetLP``, which sums flux and would otherwise charge a
+        unit for the uptake of everything sharing the pool with it.
     tol : float, optional
         The minimum flux a core reaction must carry (default 1e-4).
     problem_type : {"minNetMILP", "minNetLP"}, optional
@@ -776,7 +811,9 @@ def gapfill_community(
             f"These core reactions are not in the community model: "
             f"{sorted(unknown)[:5]}."
         )
-    all_weights = _community_weights(community, exchange_weight, weights)
+    all_weights = _community_weights(
+        community, _exchange_weight(exchange_weight, problem_type), weights
+    )
 
     working = community
     blocked_core: Tuple[str, ...] = ()
