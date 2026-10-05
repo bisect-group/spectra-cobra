@@ -25,7 +25,16 @@ large-scale. bioRxiv. https://doi.org/10.64898/2026.04.02.716249
 """
 
 from ._orientation import STOICHIOMETRY, TOPOLOGY
-from .community import CommunityModel, build_community_model
+from .community import (
+    COUPLING_FACTOR,
+    COUPLING_THRESHOLD,
+    POOL_MODES,
+    POOLED,
+    SHARED,
+    CommunityModel,
+    build_community_model,
+    build_multi_tissue_model,
+)
 from .consistency import (
     blocked_reaction_ids,
     consistent_reaction_ids,
@@ -101,7 +110,13 @@ __all__ = (
     "DEFAULT_MIN_GROWTH",
     # Communities.
     "build_community_model",
+    "build_multi_tissue_model",
     "CommunityModel",
+    "POOLED",
+    "SHARED",
+    "POOL_MODES",
+    "COUPLING_FACTOR",
+    "COUPLING_THRESHOLD",
     "minimal_microbiome",
     "MinimalMicrobiome",
     # Metabolic tasks, and gap-filling towards them.

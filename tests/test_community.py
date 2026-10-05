@@ -4,7 +4,12 @@ import pytest
 from cobra import Metabolite, Model, Reaction
 
 from spectra_cobra import SpectraError
-from spectra_cobra.community import ORGANISM_SEPARATOR, build_community_model
+from spectra_cobra.community import (
+    COUPLING_THRESHOLD,
+    ORGANISM_SEPARATOR,
+    SHARED,
+    build_community_model,
+)
 
 
 def _organism(name: str, solver: str, eats: str, makes: str) -> Model:
@@ -124,9 +129,10 @@ def test_coupling_shuts_an_organism_down_with_its_biomass(pair) -> None:
         model.objective = model.reactions.get_by_id(community.biomass_reactions["C"])
         growth = model.slim_optimize() or 0.0
 
-    assert growth == pytest.approx(
-        0.0, abs=1e-2
-    ), "with the producer shut down nothing should reach the consumer"
+    assert growth <= COUPLING_THRESHOLD + 1e-9, (
+        "with the producer shut down the consumer should be held to the "
+        "coupling threshold, which is all a dead unit may carry"
+    )
 
 
 def test_without_coupling_a_dead_organism_still_feeds_the_others(pair) -> None:
@@ -213,3 +219,273 @@ def test_both_compartment_spellings_share_a_pool(solver: str, spelling) -> None:
     pooled = [m.id for m in community.model.metabolites if m.compartment == "u"]
     assert pooled == ["glc_u"], f"got {pooled}"
     assert "EX_glc_u" in community.model.reactions
+
+
+def test_shared_mode_needs_no_transports_and_agrees_with_pooled(pair) -> None:
+    """Sharing the external compartment is the same model, built smaller."""
+    medium = {"glc_e": (-10.0, 1000.0)}
+    pooled = build_community_model(list(pair), organisms=["P", "C"], pool_medium=medium)
+    shared = build_community_model(
+        list(pair), organisms=["P", "C"], mode=SHARED, pool_medium=medium
+    )
+
+    assert not [r for r in shared.model.reactions if r.id.startswith("TR_")]
+    assert [r for r in pooled.model.reactions if r.id.startswith("TR_")]
+    assert len(shared.model.reactions) < len(pooled.model.reactions)
+
+    def consumer_growth(community):
+        model = community.model
+        model.objective = model.reactions.get_by_id(community.biomass_reactions["C"])
+        return model.slim_optimize()
+
+    assert consumer_growth(shared) == pytest.approx(consumer_growth(pooled), rel=1e-6)
+
+
+def test_shared_mode_allows_only_one_pool(pair) -> None:
+    """Its pool is the external compartment, and there is only one of those."""
+    with pytest.raises(SpectraError, match="only be one pool"):
+        build_community_model(
+            list(pair),
+            organisms=["P", "C"],
+            mode=SHARED,
+            pools={"a": ["P"], "b": ["C"]},
+            environment=["a"],
+        )
+
+
+def test_shared_mode_rejects_link_bounds(pair) -> None:
+    """There is no per-unit reaction left to bound."""
+    with pytest.raises(SpectraError, match="no such reactions to bound"):
+        build_community_model(
+            list(pair),
+            organisms=["P", "C"],
+            mode=SHARED,
+            link_bounds={"glc_e": (0.0, 1.0)},
+        )
+
+
+@pytest.fixture(scope="function")
+def three(solver: str):
+    """Return three units: two on the blood, one reachable only through B."""
+    return (
+        _organism("a", solver, eats="glc", makes="ac"),
+        _organism("b", solver, eats="glc", makes="ac"),
+        _organism("c", solver, eats="ac", makes="co2"),
+    )
+
+
+def _blood_and_interface(three, **kwargs):
+    """Join three units with one open pool and one closed interface."""
+    return build_community_model(
+        list(three),
+        organisms=["A", "B", "C"],
+        pools={"Bl": ["A", "B"], "iface": ["B", "C"]},
+        environment=["Bl"],
+        pool_medium={"glc_e": (-10.0, 1000.0)},
+        **kwargs,
+    )
+
+
+def test_an_interface_pool_gets_no_exchanges(three) -> None:
+    """Only the pools named in environment may reach outside."""
+    community = _blood_and_interface(three)
+
+    assert "EX_glc_Bl" in community.model.reactions
+    assert not [
+        rxn_id for rxn_id in community.community_exchanges if rxn_id.endswith("_iface")
+    ]
+
+
+def test_a_unit_off_the_open_pool_lives_through_its_neighbour(three) -> None:
+    """C never touches the blood, so everything it eats comes from B."""
+    community = _blood_and_interface(three)
+    model = community.model
+    model.objective = model.reactions.get_by_id(community.biomass_reactions["C"])
+
+    assert (model.slim_optimize() or 0.0) > 1e-6
+
+    with model:
+        model.reactions.get_by_id(community.biomass_reactions["B"]).bounds = (0.0, 0.0)
+        starved = model.slim_optimize() or 0.0
+    assert starved <= COUPLING_THRESHOLD + 1e-9
+
+
+def test_several_pools_must_say_which_reach_the_environment(three) -> None:
+    """Defaulting to all of them would let an interface bypass the blood."""
+    with pytest.raises(SpectraError, match="which of them"):
+        build_community_model(
+            list(three),
+            organisms=["A", "B", "C"],
+            pools={"Bl": ["A", "B"], "iface": ["B", "C"]},
+        )
+
+
+@pytest.mark.parametrize(
+    "pools, environment, message",
+    [
+        ({"Bl": ["A", "B", "nope"]}, ["Bl"], "do not exist"),
+        ({"Bl": ["A", "B"]}, ["Bl"], "in at least one pool"),
+        ({"A": ["A", "B", "C"]}, ["A"], "cannot be named after a unit"),
+        ({"Bl": ["A", "B", "C"]}, ["missing"], "unknown pools"),
+    ],
+)
+def test_pools_are_validated(three, pools, environment, message) -> None:
+    """A pool graph that does not make sense should say so, not solve."""
+    with pytest.raises(SpectraError, match=message):
+        build_community_model(
+            list(three), organisms=["A", "B", "C"], pools=pools, environment=environment
+        )
+
+
+def test_link_bounds_constrain_what_crosses_into_a_pool(three) -> None:
+    """This is where a measured uptake rate goes."""
+    community = _blood_and_interface(three, link_bounds={"ac_e": (-2.0, 3.0)})
+    model = community.model
+
+    assert model.reactions.get_by_id("TR_ac_Bl__A").bounds == (-2.0, 3.0)
+    assert model.reactions.get_by_id("TR_ac_iface__C").bounds == (-2.0, 3.0)
+    assert model.reactions.get_by_id("TR_glc_Bl__A").bounds == (-1000.0, 1000.0)
+
+
+def test_pool_medium_constrains_the_community_exchanges(three) -> None:
+    """Anything unnamed stays shut to uptake."""
+    community = _blood_and_interface(three)
+    model = community.model
+
+    assert model.reactions.EX_glc_Bl.bounds == (-10.0, 1000.0)
+    assert model.reactions.EX_ac_Bl.lower_bound == 0.0
+
+
+def test_a_closed_community_is_refused(solver: str) -> None:
+    """With no way in or out nothing can grow, so say so at build time.
+
+    The unit here has no demand or sink of its own, so shutting the pool
+    really does close it. A unit that kept one would stay open, which is
+    why the check looks for any boundary reaction rather than for an
+    exchange on a pool.
+    """
+    model = Model("sealed")
+    outside = Metabolite("glc_e", compartment="e")
+    inside = Metabolite("x_c", compartment="c")
+    model.add_metabolites([outside, inside])
+    uptake = Reaction("UP", lower_bound=0.0, upper_bound=1000.0)
+    back = Reaction("BACK", lower_bound=0.0, upper_bound=1000.0)
+    model.add_reactions([uptake, back])
+    uptake.add_metabolites({outside: -1.0, inside: 1.0})
+    back.add_metabolites({inside: -1.0, outside: 1.0})
+    model.add_boundary(outside, type="exchange")
+    model.objective = uptake
+    model.solver = solver
+
+    with pytest.raises(SpectraError, match="no boundary reaction"):
+        build_community_model([model], organisms=["X"], environment=[])
+
+
+def _database(solver: str) -> Model:
+    """Return a database holding the producer's reactions and one more."""
+    model = _organism("db", solver, eats="glc", makes="ac")
+    spare = Reaction("SPARE", lower_bound=0.0, upper_bound=1000.0)
+    model.add_reactions([spare])
+    spare.add_metabolites({model.metabolites.get_by_id("x_c"): -1.0})
+    return model
+
+
+def test_a_database_is_folded_in_and_its_extra_reactions_recorded(
+    pair, solver: str
+) -> None:
+    """The unit holds the whole database; the draft supplies the bounds."""
+    producer, consumer = pair
+    producer.reactions.CONV.bounds = (0.0, 7.0)
+
+    community = build_community_model(
+        [producer, consumer],
+        organisms=["P", "C"],
+        databases={"P": _database(solver)},
+    )
+
+    assert "SPARE__P" in community.model.reactions
+    assert community.database_reactions["P"] == ("SPARE__P",)
+    assert "CONV__P" in community.draft_reactions["P"]
+    assert community.model.reactions.get_by_id("CONV__P").bounds == (
+        0.0,
+        7.0,
+    ), "where both have the reaction, what is known about this unit wins"
+    assert "C" not in community.database_reactions
+
+
+def test_the_anchor_is_reported_with_how_it_was_decided(pair) -> None:
+    """The caller has to be able to see what their model got coupled to."""
+    community = build_community_model(list(pair), organisms=["P", "C"])
+
+    assert community.anchor_sources == {"P": "objective", "C": "objective"}
+    assert community.anchor_reactions is community.biomass_reactions
+    assert "biomass__P" in community.coupling_summary()
+
+    given = build_community_model(
+        list(pair),
+        organisms=["P", "C"],
+        biomass_reactions={"P": "CONV", "C": "biomass"},
+    )
+    assert given.biomass_reactions["P"] == "CONV__P"
+    assert given.anchor_sources["P"] == "given"
+
+
+def test_an_ambiguous_anchor_is_refused_rather_than_guessed(solver: str) -> None:
+    """Coupling a unit to the wrong reaction would not fail loudly."""
+    model = Model("ambiguous")
+    inside = Metabolite("x_c", compartment="c")
+    model.add_metabolites([inside])
+    first = Reaction("GROW", lower_bound=0.0, upper_bound=1000.0)
+    second = Reaction("ATPM", lower_bound=0.0, upper_bound=1000.0)
+    model.add_reactions([first, second])
+    first.add_metabolites({inside: -1.0})
+    second.add_metabolites({inside: -1.0})
+    model.objective = {first: 1.0, second: 1.0}
+    model.solver = solver
+
+    with pytest.raises(SpectraError, match="candidates look like"):
+        build_community_model([model], organisms=["X"])
+
+
+def test_decompose_gives_each_unit_back_untagged(pair) -> None:
+    """What was a transport into the pool comes back as an exchange."""
+    community = build_community_model(
+        list(pair), organisms=["P", "C"], pool_medium={"glc_e": (-10.0, 1000.0)}
+    )
+
+    parts = community.decompose()
+
+    assert set(parts) == {"P", "C"}
+    producer = parts["P"]
+    # SEC is written "ac_e ->", which the builder rightly treats as an
+    # exchange and replaces with a transport; that transport is what comes
+    # back as this unit's own exchange.
+    assert {"UP", "CONV", "biomass"} <= {r.id for r in producer.reactions}
+    assert not [r.id for r in producer.reactions if ORGANISM_SEPARATOR in r.id]
+    assert not [m.id for m in producer.metabolites if ORGANISM_SEPARATOR in m.id]
+    assert producer.boundary, "the unit must still be able to feed itself"
+
+
+def test_multi_tissue_replicates_one_model_across_tissues(solver: str) -> None:
+    """Tissues differ by their bounds and their pool, not by their network."""
+    from spectra_cobra import build_multi_tissue_model
+
+    gem = _organism("gem", solver, eats="glc", makes="ac")
+
+    body = build_multi_tissue_model(
+        gem,
+        tissues=["tis1", "tis2", "tis3"],
+        pools={"Bl": ["tis1", "tis2"], "tis2_tis3": ["tis2", "tis3"]},
+        environment=["Bl"],
+        anchor_reactions={t: "biomass" for t in ("tis1", "tis2", "tis3")},
+        pool_medium={"glc_e": (-10.0, 1000.0)},
+    )
+
+    assert body.organisms == ("tis1", "tis2", "tis3")
+    assert all(source == "given" for source in body.anchor_sources.values())
+    assert "EX_glc_Bl" in body.model.reactions
+    assert "EX_glc_tis2_tis3" not in body.model.reactions
+    # tis3 never touches the blood, so it eats only what tis2 passes on.
+    assert not [
+        rxn_id for rxn_id in body.reactions_of["tis3"] if rxn_id.endswith("_Bl__tis3")
+    ]
