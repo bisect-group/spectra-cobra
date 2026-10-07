@@ -479,7 +479,6 @@ def gapfill_for_tasks(
        )
 
     """
-    from .formulations import min_net_milp
     from .tasks import check_tasks, essential_reactions_for_tasks, task_constraints
 
     draft_ids = {rxn.id for rxn in draft.reactions}
@@ -536,8 +535,19 @@ def gapfill_for_tasks(
                     for rxn in constrained.reactions
                 }
                 try:
-                    solution = min_net_milp(
-                        constrained, {}, weights, tol, True, time_limit, None
+                    # Always mixed-integer here, whatever `problem_type` the
+                    # core solve used: repairing one task is a small problem
+                    # and counting reactions exactly is what it is for.
+                    _, solution = spectra_me(
+                        constrained,
+                        [],
+                        tol=tol,
+                        weights=weights,
+                        problem_type=MIN_NET_MILP,
+                        time_limit=time_limit,
+                        remove_genes=False,
+                        seed=seed,
+                        return_solutions=True,
                     )
                 except (SpectraSolverError, SpectraError) as error:
                     failed[result.task.id] = f"{type(error).__name__}: {error}"

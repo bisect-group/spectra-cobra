@@ -9,7 +9,17 @@ interested in — at a stated fraction of what the whole community managed.
 This is the extraction machinery pointed at organisms rather than reactions,
 and the mapping is exact. Give each organism's biomass reaction a binary and
 a weight of 1, weight everything else 0, and minimising the weighted count
-*is* minimising the number of organisms present.
+*is* minimising the number of organisms present. It runs through
+:func:`~spectra_cobra.spectra_me` with ``problem_type="minNetMILP"`` and
+``indicator_reactions`` set to the biomass reactions — the same routine as
+every other reconstruction in the package, with a different objective
+pointed at a different thing.
+
+The membership comes back through ``return_solutions``, not off the reduced
+model. The distinction matters: an organism's biomass reaction can survive
+in the extracted model on a trace of flux while its binary is off, so
+reading presence from the model would count an absent organism as present.
+``MilpSolution.selected`` reports the binaries themselves.
 
 Building a community
 --------------------

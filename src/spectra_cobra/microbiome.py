@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Tuple
 
 from .community import CommunityModel
 from .exceptions import SpectraError
-from .formulations import min_net_milp
+from .extraction import MIN_NET_MILP, spectra_me
 
 if TYPE_CHECKING:
     from cobra.core import Model
@@ -233,7 +233,11 @@ def minimal_microbiome(
     time_limit : float, optional
         Seconds to spend on the mixed-integer solve (default 300).
     seed : int, optional
-        A seed for the extraction's randomised coefficients.
+        A seed for the extraction's randomised coefficients. It is passed
+        through, but there is nothing random to seed here: those
+        coefficients belong to the direction phase, and with no core
+        reactions that phase has nothing to settle. Reproducibility of the
+        membership rests on the solver, not on this.
 
     Returns
     -------
@@ -342,19 +346,23 @@ def minimal_microbiome(
             for o in community.organisms
             if o not in required_set
         ]
-        # min_net_milp directly rather than through spectra_me: with no core
-        # reactions the direction phase has nothing to settle, so the two are
-        # the same solve, and this one hands back the indicator values. Those
-        # are the membership vector, which is the whole answer here.
-        solution = min_net_milp(
+        # The extraction, with no core reactions: the requirements are
+        # already bounds on the model, so there is nothing for the direction
+        # phase to settle. ``return_solutions`` is what makes this work --
+        # the indicator values *are* the membership vector, and the model
+        # cannot report them, since an organism's biomass reaction can
+        # survive on a trace of flux with its binary off.
+        _, solution = spectra_me(
             model,
-            {},
-            selection_weights,
-            tol,
-            True,
-            time_limit,
-            None,
-            indicators,
+            [],
+            tol=tol,
+            weights=selection_weights,
+            problem_type=MIN_NET_MILP,
+            time_limit=time_limit,
+            remove_genes=False,
+            seed=seed,
+            indicator_reactions=indicators,
+            return_solutions=True,
         )
         chosen = {
             organism
