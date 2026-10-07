@@ -57,6 +57,9 @@ What is in the package
    * - :doc:`functions/community`
      - Joins models into a community or a body, and reduces a community
        to a minimal one
+   * - :doc:`functions/reactome`
+     - Cuts a model down to the smallest network that still grows,
+       produces or performs its tasks
 
 Which function do I want?
 -------------------------
@@ -77,6 +80,10 @@ Which function do I want?
   at a time is :func:`~spectra_cobra.gapfill_community`.
 * To reduce a community to the smallest membership that still does the job,
   use :func:`~spectra_cobra.minimal_microbiome`.
+* To find the fewest *reactions* a model needs in order to grow in a medium,
+  make a metabolite or perform a list of tasks, use
+  :func:`~spectra_cobra.minimal_reactome` and see
+  :doc:`tutorials/minimal_reactome`.
 
 Citation
 --------
@@ -104,6 +111,7 @@ Citation
    functions/tasks
    functions/gapfilling
    functions/community
+   functions/reactome
 
 .. toctree::
    :maxdepth: 2
@@ -118,6 +126,7 @@ Citation
    tutorials/gapfilling_media
    tutorials/multicellular
    tutorials/minimal_microbiome
+   tutorials/minimal_reactome
    tutorials/recon3d
 
 .. toctree::

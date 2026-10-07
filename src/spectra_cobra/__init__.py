@@ -75,6 +75,11 @@ from .gapfilling import (
     gapfill_for_tasks,
 )
 from .microbiome import MinimalMicrobiome, minimal_microbiome
+from .reactome import (
+    DEFAULT_GROWTH_FRACTION,
+    MinimalReactome,
+    minimal_reactome,
+)
 from .tasks import (
     MetabolicTask,
     TaskEquation,
@@ -127,6 +132,10 @@ __all__ = (
     "COUPLING_THRESHOLD",
     "minimal_microbiome",
     "MinimalMicrobiome",
+    # Minimal reactomes.
+    "minimal_reactome",
+    "MinimalReactome",
+    "DEFAULT_GROWTH_FRACTION",
     # Metabolic tasks, and gap-filling towards them.
     "MetabolicTask",
     "TaskEquation",
