@@ -53,6 +53,25 @@ Arguments worth knowing
 ``seed``
    Pins the randomised objective coefficients so a run is reproducible.
 
+``indicator_reactions`` and ``indicator_groups``
+   Change what the mixed-integer binaries range over: one per named
+   reaction, or one shared between the reactions of each group. See
+   :doc:`formulations`.
+
+``return_solutions``
+   Also hand back the :class:`~spectra_cobra.MilpSolution` behind each model.
+   The solution says which indicators the solver actually switched on, which
+   the model cannot: a reaction can be in the model because it carries a
+   trace of flux while its binary is off. When the binaries mean something in
+   themselves — an organism's presence, a group's membership — that
+   distinction is the answer rather than an implementation detail.
+
+   .. code-block:: python
+
+      model, solution = spectra_me(..., return_solutions=True)
+      solution.selected      # the indicators switched on
+      solution.included      # those, plus whatever carries flux regardless
+
 Errors
 ------
 

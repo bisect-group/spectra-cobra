@@ -13,7 +13,17 @@ it had to drop.
 """
 
 from logging import getLogger
-from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Set, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 
 import numpy as np
 
@@ -104,7 +114,9 @@ def _warn_on_loose_tolerance(model: "Model", tol: float) -> None:
 
 
 def _normalise_weights(
-    model: "Model", weights: Optional[Dict[str, float]]
+    model: "Model",
+    weights: Optional[Dict[str, float]],
+    extra: Iterable[str] = (),
 ) -> Dict[str, float]:
     """Return a weight for every reaction, defaulting to one.
 
@@ -115,29 +127,39 @@ def _normalise_weights(
     weights : dict of {str: float}, optional
         The weights to use, keyed by reaction identifier. Reactions left out
         get a weight of 1.0 (default None, i.e. all ones).
+    extra : iterable of str, optional
+        Further keys that may be weighted even though they are not
+        reactions of the model: the keys of `indicator_groups`, which name
+        a group of reactions rather than one reaction, and which the
+        objective looks the weight up by.
 
     Returns
     -------
     dict of {str: float}
-        A weight for each reaction in the model.
+        A weight for each reaction in the model, and for each extra key.
 
     Raises
     ------
     SpectraError
-        If `weights` mentions a reaction the model does not have.
+        If `weights` mentions something that is neither.
 
     """
+    extra = set(extra)
     if weights is None:
-        return {rxn.id: 1.0 for rxn in model.reactions}
+        all_weights = {rxn.id: 1.0 for rxn in model.reactions}
+        all_weights.update({key: 1.0 for key in extra})
+        return all_weights
 
-    known = {rxn.id for rxn in model.reactions}
+    known = {rxn.id for rxn in model.reactions} | extra
     unknown = set(weights) - known
     if unknown:
         raise SpectraError(
             f"weights refers to {len(unknown)} reaction(s) that are not in the "
             f"model, for example {sorted(unknown)[:5]}."
         )
-    return {rxn.id: float(weights.get(rxn.id, 1.0)) for rxn in model.reactions}
+    all_weights = {rxn.id: float(weights.get(rxn.id, 1.0)) for rxn in model.reactions}
+    all_weights.update({key: float(weights.get(key, 1.0)) for key in extra})
+    return all_weights
 
 
 def _normalise_core(model: "Model", core_reactions: Iterable) -> Set[str]:
@@ -336,6 +358,7 @@ def _solve_formulation(
     previous_solutions: Optional[List[Set[str]]] = None,
     inclusion_cutoff: Optional[float] = None,
     indicator_reactions: Optional[Iterable[str]] = None,
+    indicator_groups: Optional[Mapping[str, Iterable[str]]] = None,
 ) -> MilpSolution:
     """Dispatch to the requested network inference formulation.
 
@@ -389,6 +412,14 @@ def _solve_formulation(
             f"{MILP_PROBLEM_TYPES}, not {problem_type!r}."
         )
 
+    if indicator_groups is not None and problem_type != MIN_NET_MILP:
+        raise SpectraError(
+            f"indicator_groups needs {MIN_NET_MILP!r}, not {problem_type!r}. "
+            f"tradeOff gives a reversible reaction two further binaries of "
+            f"its own, which a shared indicator would have to govern too, and "
+            f"the linear formulations have no binaries at all."
+        )
+
     if problem_type == MIN_NET_LP:
         kept = min_net_lp(
             model, directions, weights, tol, steady_state, inclusion_cutoff
@@ -405,22 +436,23 @@ def _solve_formulation(
             directions,
             weights,
             tol,
-            steady_state,
-            time_limit,
-            previous_solutions,
-            indicator_reactions,
-            inclusion_cutoff,
+            steady_state=steady_state,
+            time_limit=time_limit,
+            previous_solutions=previous_solutions,
+            indicator_reactions=indicator_reactions,
+            inclusion_cutoff=inclusion_cutoff,
+            indicator_groups=indicator_groups,
         )
     return trade_off(
         model,
         directions,
         weights,
         tol,
-        steady_state,
-        time_limit,
-        previous_solutions,
-        indicator_reactions,
-        inclusion_cutoff,
+        steady_state=steady_state,
+        time_limit=time_limit,
+        previous_solutions=previous_solutions,
+        indicator_reactions=indicator_reactions,
+        inclusion_cutoff=inclusion_cutoff,
     )
 
 
@@ -481,7 +513,9 @@ def spectra_me(
     seed: Optional[int] = None,
     inclusion_cutoff: Optional[float] = None,
     indicator_reactions: Optional[Iterable[str]] = None,
-) -> "Model":
+    indicator_groups: Optional[Mapping[str, Iterable[str]]] = None,
+    return_solutions: bool = False,
+) -> Union["Model", List["Model"], Tuple]:
     """Extract a context-specific model around a set of core reactions.
 
     Parameters
@@ -535,12 +569,33 @@ def spectra_me(
     seed : int, optional
         A seed for the random coefficients, making the result reproducible
         (default None).
+    indicator_reactions : iterable of str, optional
+        Restrict the mixed-integer binaries to these reactions; the rest
+        stay continuous and are kept whatever they do. One binary per
+        organism in a community, say, rather than one per reaction.
+    indicator_groups : dict of {str: iterable of str}, optional
+        Give the reactions of each group one **shared** binary, so they are
+        kept or dropped together and cost the group's weight once. Needs
+        ``problem_type="minNetMILP"``, and is mutually exclusive with
+        `indicator_reactions`. This is what expresses a requirement holding
+        in several conditions at once: replicate the network per condition
+        and group each reaction's copies. See
+        :func:`~spectra_cobra.minimal_reactome`.
+    return_solutions : bool, optional
+        Also return the :class:`~spectra_cobra.MilpSolution` behind each
+        model (default False). The solution carries which indicators the
+        solver actually switched on, which the model cannot tell you: a
+        reaction can be in the model because it carries a trace of flux
+        while its binary is off. When the binaries mean something in
+        themselves -- an organism's presence, a group's membership -- that
+        distinction is the answer rather than an implementation detail.
 
     Returns
     -------
     cobra.Model or list of cobra.Model
         The extracted model, or a list of `n_solutions` models if more than
-        one was asked for.
+        one was asked for. With `return_solutions`, a tuple of that and the
+        matching :class:`~spectra_cobra.MilpSolution`, or list of them.
 
     Raises
     ------
@@ -557,7 +612,7 @@ def spectra_me(
 
     """
     _warn_on_loose_tolerance(model, tol)
-    models, _ = _spectra_me(
+    models, solutions = _spectra_me(
         model,
         core_reactions,
         tol=tol,
@@ -572,8 +627,12 @@ def spectra_me(
         seed=seed,
         inclusion_cutoff=inclusion_cutoff,
         indicator_reactions=indicator_reactions,
+        indicator_groups=indicator_groups,
     )
-    return models[0] if n_solutions == 1 else models
+    extracted = models[0] if n_solutions == 1 else models
+    if not return_solutions:
+        return extracted
+    return extracted, (solutions[0] if n_solutions == 1 else solutions)
 
 
 def _spectra_me(
@@ -592,8 +651,9 @@ def _spectra_me(
     blocked_ids: Optional[Set[str]] = None,
     inclusion_cutoff: Optional[float] = None,
     indicator_reactions: Optional[Iterable[str]] = None,
-) -> Tuple[List["Model"], List[Set[str]]]:
-    """Run the extraction, returning the models and the reaction sets found.
+    indicator_groups: Optional[Mapping[str, Iterable[str]]] = None,
+) -> Tuple[List["Model"], List[MilpSolution]]:
+    """Run the extraction, returning the models and the solutions found.
 
     Parameters
     ----------
@@ -640,7 +700,7 @@ def _spectra_me(
         )
 
     steady_state = validate_consistency_type(consistency_type)
-    all_weights = _normalise_weights(model, weights)
+    all_weights = _normalise_weights(model, weights, (indicator_groups or {}))
     core_ids = _normalise_core(model, core_reactions)
     if blocked_ids:
         core_ids -= blocked_ids
@@ -676,9 +736,10 @@ def _spectra_me(
                 steady_state,
                 problem_type,
                 time_limit,
-                exclude or None,
-                inclusion_cutoff,
-                indicator_reactions,
+                previous_solutions=exclude or None,
+                inclusion_cutoff=inclusion_cutoff,
+                indicator_reactions=indicator_reactions,
+                indicator_groups=indicator_groups,
             )
         except SpectraSolverError:
             # Excluding every solution found so far can leave the problem with
@@ -697,7 +758,7 @@ def _spectra_me(
             raise
 
         models.append(_extract(model, solution.included, remove_genes))
-        found.append(solution.included)
+        found.append(solution)
 
         if alt_solution_method == PATHWAY_EXCLUSION:
             # The exclusion constraint is written over the indicators, so it
@@ -839,8 +900,8 @@ def spectra_ccme(
         steady_state,
         problem_type,
         time_limit,
-        None,
-        inclusion_cutoff,
+        previous_solutions=None,
+        inclusion_cutoff=inclusion_cutoff,
     )
     first = _extract(model, solution.included, remove_genes)
 
