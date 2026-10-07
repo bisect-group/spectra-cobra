@@ -206,11 +206,62 @@ print(body.coupling_summary())    # what each tissue got coupled to
 be closed by another's secretion instead of by a new reaction. That is why
 the joint answer is smaller than filling the members one at a time.
 
-`minimal_microbiome` is the `minNetMILP` formulation pointed at organisms:
-each biomass reaction gets a binary through `indicator_reactions` and a
-weight of 1, everything else is weighted 0, so minimising the weighted count
-minimises the membership vector. Growth and production requirements are
-measured on the full community first, then imposed as a fraction of it.
+`minimal_microbiome` is `spectra_me` with `problem_type="minNetMILP"`
+pointed at organisms: each biomass reaction gets a binary through
+`indicator_reactions` and a weight of 1, everything else is weighted 0, so
+minimising the weighted count minimises the membership vector. Growth and
+production requirements are measured on the full community first, then
+imposed as a fraction of it.
+
+Every routine in the package reaches the solver through `spectra_cc`,
+`spectra_me` or `spectra_ccme` — there is no second implementation of any
+formulation. What changes between a context-specific model, a minimal
+reactome, a gap-filled draft and a minimal microbiome is the universal
+model, the evidence supplied and the objective chosen.
+
+## Minimal reactomes
+
+The opposite of gap-filling: the smallest set of reactions that still meets
+a requirement. `minimal_reactome` is `minNetMILP` with no core set at all —
+every reaction gets a binary, the requirements enter as bounds, and the
+objective counts reactions.
+
+```python
+from spectra_cobra import minimal_reactome
+
+result = minimal_reactome(
+    model,
+    medium={"glucose": glucose, "acetate": acetate},   # must work in both
+    growth_fraction=1.0,              # lose no growth at all
+    products={"EX_succ_e": 1.0},      # and still secrete succinate
+    tasks=task_list,                  # and still perform these
+    keep_reactions=["ATPM"],          # and still carry flux through these
+)
+print(result.summary())
+```
+
+The answer is minimal *for an environment*, which is Burgard's original
+point: on iJO1366 at full wild-type growth it is 437 reactions on glucose,
+431 on acetate, 433 on glycerol and 434 on succinate — 17% of a
+2583-reaction model, about 15 s each, every one verified.
+
+A metabolic task defines its own medium, so it cannot share a flux vector
+with the growth requirement; neither can a second medium. Both therefore
+become separate **conditions**: the network is replicated once per condition
+and one binary per reaction governs every copy, so what is minimised is the
+size of the union while each condition is satisfied in its own right. On the
+textbook model with one growth condition and three tasks that is 51
+reactions, against 58 for the union of four separate solves; on iJO1366 with
+three media it is 448 against 458.
+
+`preprocess` is on by default and settles what it can exactly before the
+MILP starts — reactions that can carry no flux in any condition are deleted,
+reactions some condition is infeasible without are forced in without a
+binary. On iJO1366 on glucose that is 2057 blocked and 407 essential,
+leaving 119 binaries out of 2583, and the objective is 28 either way. It
+costs LPs, so it loses on problems that already close quickly and wins on
+the ones that do not: at 50% growth and an equal 1200 s budget it returns
+425 reactions against 440 without it.
 
 ## Steady state or accumulation
 
