@@ -33,6 +33,45 @@ want to supply the reaction directions yourself.
 See :doc:`../tutorials/formulations` for which to choose and what the weight
 conventions mean in practice.
 
+Indicators, and sharing one
+---------------------------
+
+The mixed-integer formulations decide membership with a binary per free
+reaction. Two arguments change that.
+
+``indicator_reactions``
+   Restrict the binaries to these reactions. Everything else free stays
+   continuous and is kept whatever it does. One binary per *organism* rather
+   than per reaction is what makes
+   :func:`~spectra_cobra.minimal_microbiome` tractable on a community.
+
+``indicator_groups``
+   Give the reactions of each group **one shared binary**, so they are kept
+   or dropped together and cost the group's weight once however many of them
+   there are. ``minNetMILP`` only, and mutually exclusive with
+   ``indicator_reactions``.
+
+.. math::
+
+   \text{minimize} \quad \sum_g w_g z_g
+   \qquad \text{s.t.} \quad
+   lb_i\, z_g \le v_i \le ub_i\, z_g \quad \text{for every } i \in g
+
+Sharing a binary is how a requirement that holds in several conditions at
+once is expressed: replicate the network once per condition, group each
+reaction's copies together, and the objective counts reactions while the
+constraints are satisfied separately in every condition. That is exactly
+what :func:`~spectra_cobra.minimal_reactome` does.
+
+With neither argument each group has a single member keyed by the reaction's
+own identifier, which is the ordinary formulation and why
+:attr:`~spectra_cobra.MilpSolution.selected` reads as a set of reactions.
+With groups it is a set of group keys.
+
+``tradeOff`` takes ``indicator_reactions`` but not ``indicator_groups``: a
+reversible reaction there gets two further binaries of its own, which a
+shared indicator would have to govern too.
+
 Directions
 ----------
 

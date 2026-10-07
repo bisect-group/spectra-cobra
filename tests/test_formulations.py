@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
-from cobra import Model
+from cobra import Model, Reaction
 
 from spectra_cobra import (
     SpectraError,
@@ -302,7 +302,7 @@ def test_milp_solution_unions_the_flux_with_the_binaries(toy_model: Model) -> No
     with toy_model:
         toy_model.objective = toy_model.reactions.R5
         toy_model.slim_optimize()
-        solution = _milp_solution(toy_model, {}, {}, 1e-4)
+        solution = _milp_solution(toy_model, {}, {}, {}, 1e-4)
         carrying = {rxn.id for rxn in toy_model.reactions if abs(rxn.flux) > 1e-9}
 
     assert solution.selected == set(), "no indicators means nothing selected"
@@ -505,3 +505,166 @@ def test_reactions_outside_the_support_do_not_count(caplog) -> None:
     with caplog.at_level("WARNING"):
         _warn_on_noisy_support(model, {"A"}, 1e-4)
     assert not caplog.text
+
+
+# --------------------------------------------------------------------------
+# Indicator groups: one binary shared between several reactions.
+# --------------------------------------------------------------------------
+
+
+def _singletons(model: Model, exclude: set) -> dict:
+    """Return a one-reaction group for every free reaction but these.
+
+    Parameters
+    ----------
+    model : cobra.Model
+        The model whose reactions to group.
+    exclude : set of str
+        Reactions already in some other group.
+
+    Returns
+    -------
+    dict of {str: list of str}
+        A group per remaining reaction, keyed by its own identifier.
+
+    """
+    return {r.id: [r.id] for r in model.reactions if r.id not in exclude}
+
+
+def test_a_shared_binary_makes_a_group_cost_one(toy_model: Model) -> None:
+    """Four reactions behind one binary are cheaper than three behind three.
+
+    The toy has three routes into D: four reactions by R1-R4, three by
+    R6-R8, three by R9-R11. Counted one at a time the long route loses.
+    Put it behind a single indicator and it costs 1 against 3, so it wins
+    -- which is only possible if the binary really is shared.
+    """
+    directions = {"R5": 1}
+    long_route = ["R1", "R2", "R3", "R4"]
+    groups = {"p1": long_route, **_singletons(toy_model, set(long_route) | {"R5"})}
+    weights = {key: 1.0 for key in groups}
+
+    solution = min_net_milp(
+        toy_model, directions, weights, 1e-4, indicator_groups=groups
+    )
+
+    assert solution.selected == {"p1"}
+    assert solution.included == {"R1", "R2", "R3", "R4", "R5"}
+
+
+def test_without_the_group_the_short_route_wins(toy_model: Model) -> None:
+    """The same problem, one binary per reaction: the long route loses."""
+    solution = min_net_milp(toy_model, {"R5": 1}, _ones(toy_model), 1e-4)
+
+    assert len(solution.included) == 4
+    assert not {"R1", "R2", "R3", "R4"} <= solution.included
+
+
+def test_a_group_drags_its_members_in_even_at_zero_flux(toy_model: Model) -> None:
+    """Switching one binary on keeps everything it governs, flux or not."""
+    dead = Reaction("R12", lower_bound=0.0, upper_bound=10.0)
+    toy_model.add_reactions([dead])
+    dead.reaction = "A --> Z"
+    long_route = ["R1", "R2", "R3", "R4", "R12"]
+    groups = {"p1": long_route, **_singletons(toy_model, set(long_route) | {"R5"})}
+    weights = {key: 1.0 for key in groups}
+
+    solution = min_net_milp(
+        toy_model, {"R5": 1}, weights, 1e-4, indicator_groups=groups
+    )
+
+    assert solution.selected == {"p1"}
+    assert "R12" in solution.included, "kept by its group, not by its flux"
+
+
+def test_one_singleton_group_each_is_the_default_behaviour(toy_model: Model) -> None:
+    """The group machinery has to reduce to what it replaced."""
+    directions = {"R5": 1}
+    plain = min_net_milp(toy_model, directions, _ones(toy_model), 1e-4)
+    grouped = min_net_milp(
+        toy_model,
+        directions,
+        _ones(toy_model),
+        1e-4,
+        indicator_groups=_singletons(toy_model, {"R5"}),
+    )
+
+    assert len(plain.included) == len(grouped.included)
+    assert plain.selected == plain.included - {"R5"}
+    assert grouped.selected == grouped.included - {"R5"}
+
+
+def test_a_free_reaction_in_no_group_is_always_kept(toy_model: Model) -> None:
+    """Nothing decides about it, so nothing may discard it."""
+    groups = {"p1": ["R6", "R7", "R8"]}
+    weights = {"p1": 1.0}
+
+    solution = min_net_milp(
+        toy_model, {"R5": 1}, weights, 1e-4, indicator_groups=groups
+    )
+
+    assert {"R9", "R10", "R11"} <= solution.included, "ungrouped, so untouchable"
+
+
+def test_an_exclusion_constraint_is_written_over_group_keys(toy_model: Model) -> None:
+    """Forbidding the group that was chosen must give a different answer."""
+    long_route = ["R1", "R2", "R3", "R4"]
+    groups = {"p1": long_route, **_singletons(toy_model, set(long_route) | {"R5"})}
+    weights = {key: 1.0 for key in groups}
+
+    first = min_net_milp(toy_model, {"R5": 1}, weights, 1e-4, indicator_groups=groups)
+    second = min_net_milp(
+        toy_model,
+        {"R5": 1},
+        weights,
+        1e-4,
+        previous_solutions=[first.selected],
+        indicator_groups=groups,
+    )
+
+    assert first.selected == {"p1"}
+    assert second.selected != first.selected
+    assert second.included != first.included
+
+
+@pytest.mark.parametrize(
+    "groups, message",
+    [
+        ({"g": []}, "empty"),
+        ({"a": ["R6"], "b": ["R6"]}, "ambiguous"),
+        ({"g": ["R5"]}, "free reactions"),
+        ({"g": ["nope"]}, "free reactions"),
+    ],
+)
+def test_a_malformed_group_is_refused(toy_model: Model, groups, message) -> None:
+    """Each of these would otherwise fail somewhere less informative."""
+    weights = {key: 1.0 for key in groups}
+    weights.update(_ones(toy_model))
+
+    with pytest.raises(SpectraError, match=message):
+        min_net_milp(toy_model, {"R5": 1}, weights, 1e-4, indicator_groups=groups)
+
+
+def test_groups_and_single_indicators_together_are_refused(toy_model: Model) -> None:
+    """Which one governs a reaction named by both would be a guess."""
+    with pytest.raises(SpectraError, match="not both"):
+        min_net_milp(
+            toy_model,
+            {"R5": 1},
+            _ones(toy_model),
+            1e-4,
+            indicator_reactions=["R6"],
+            indicator_groups={"g": ["R7"]},
+        )
+
+
+def test_a_group_without_a_weight_is_refused(toy_model: Model) -> None:
+    """Its objective coefficient is looked up by key, so it must be there."""
+    with pytest.raises(SpectraError, match="no weight"):
+        min_net_milp(
+            toy_model,
+            {"R5": 1},
+            _ones(toy_model),
+            1e-4,
+            indicator_groups={"p1": ["R1", "R2"]},
+        )

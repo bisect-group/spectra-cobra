@@ -22,7 +22,17 @@ between.
 import math
 from dataclasses import dataclass
 from logging import getLogger
-from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Set
+from typing import (
+    TYPE_CHECKING,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+)
 
 from cobra.util.solver import linear_reaction_coefficients
 from optlang.interface import FEASIBLE, OPTIMAL, TIME_LIMIT
@@ -228,7 +238,9 @@ def _warn_on_noisy_support(model: "Model", included: Set[str], tol: float) -> No
 
 
 def _included_from_indicators(
-    directions: Dict[str, int], indicators: Dict[str, "object"]
+    directions: Dict[str, int],
+    indicators: Dict[str, "object"],
+    groups: Mapping[str, Sequence[str]],
 ) -> Set[str]:
     """Return the reactions a mixed-integer solution keeps.
 
@@ -238,7 +250,10 @@ def _included_from_indicators(
         The oriented direction of each reaction. The directed ones are kept
         unconditionally, since they are forced to carry flux.
     indicators : dict of {str: optlang.Variable}
-        The binary inclusion variable of each free reaction.
+        The binary inclusion variable of each indicator group.
+    groups : dict of {str: sequence of str}
+        The reactions each binary governs. One binary may govern several,
+        in which case switching it on keeps all of them.
 
     Returns
     -------
@@ -256,7 +271,9 @@ def _included_from_indicators(
 
     """
     kept = {rxn_id for rxn_id, direction in directions.items() if direction != 0}
-    kept.update(rxn_id for rxn_id, var in indicators.items() if var.primal > 0.5)
+    for key, var in indicators.items():
+        if var.primal > 0.5:
+            kept.update(groups[key])
     return kept
 
 
@@ -269,9 +286,11 @@ class MilpSolution:
     included : set of str
         The reactions the extracted model should contain.
     selected : set of str
-        The reactions whose indicator the solver switched on. This is what
-        :func:`_add_exclusion_constraints` has to be written over, and it is
-        not always the same as `included`.
+        The **indicator groups** the solver switched on, named by their
+        keys. With one binary per reaction -- the usual case -- those keys
+        are reaction identifiers and this reads as the reactions selected.
+        This is what :func:`_add_exclusion_constraints` has to be written
+        over, and it is not always the same as `included`.
 
     Notes
     -----
@@ -295,6 +314,7 @@ def _milp_solution(
     model: "Model",
     directions: Dict[str, int],
     indicators: Dict[str, "object"],
+    groups: Mapping[str, Sequence[str]],
     tol: float,
     inclusion_cutoff: Optional[float] = None,
 ) -> MilpSolution:
@@ -307,7 +327,9 @@ def _milp_solution(
     directions : dict of {str: int}
         The oriented direction of each reaction.
     indicators : dict of {str: optlang.Variable}
-        The binary inclusion variable of each reaction that has one.
+        The binary inclusion variable of each indicator group.
+    groups : dict of {str: sequence of str}
+        The reactions each binary governs.
     tol : float
         The flux threshold, used to derive the inclusion cutoff.
     inclusion_cutoff : float, optional
@@ -319,9 +341,10 @@ def _milp_solution(
         The reactions to keep, and the ones the indicators selected.
 
     """
-    selected = _included_from_indicators(directions, indicators)
+    included = _included_from_indicators(directions, indicators, groups)
     carrying = _included_reactions(model, tol, inclusion_cutoff)
-    return MilpSolution(included=selected | carrying, selected=selected)
+    selected = {key for key, var in indicators.items() if var.primal > 0.5}
+    return MilpSolution(included=included | carrying, selected=selected)
 
 
 def _free_reaction_ids(model: "Model", directions: Dict[str, int]) -> List[str]:
@@ -341,6 +364,97 @@ def _free_reaction_ids(model: "Model", directions: Dict[str, int]) -> List[str]:
 
     """
     return [rxn.id for rxn in model.reactions if directions.get(rxn.id, 0) == 0]
+
+
+def _resolve_indicator_groups(
+    free_ids: Sequence[str],
+    indicator_reactions: Optional[Iterable[str]],
+    indicator_groups: Optional[Mapping[str, Iterable[str]]],
+) -> Tuple[Dict[str, List[str]], Set[str]]:
+    """Work out which reactions each binary governs.
+
+    Parameters
+    ----------
+    free_ids : sequence of str
+        The reactions free to be dropped, in model order.
+    indicator_reactions : iterable of str, optional
+        Restrict the binaries to these reactions, one each.
+    indicator_groups : dict of {str: iterable of str}, optional
+        Give the reactions of each group a single shared binary.
+
+    Returns
+    -------
+    dict of {str: list of str}
+        The reactions each binary governs, keyed by group.
+    set of str
+        The free reactions with no binary, which are kept regardless.
+
+    Raises
+    ------
+    SpectraError
+        If both arguments are given, a group is empty, a reaction appears
+        in two groups, or a named reaction is not free.
+
+    Notes
+    -----
+    With neither argument every free reaction gets its own binary and the
+    key is the reaction's own identifier, which is why `selected` reads as
+    a set of reactions in that case.
+
+    """
+    if indicator_reactions is not None and indicator_groups is not None:
+        raise SpectraError(
+            "Pass indicator_reactions or indicator_groups, not both: one "
+            "gives each named reaction its own binary and the other shares "
+            "one binary between several, so giving both leaves it ambiguous "
+            "which applies."
+        )
+
+    order = {rxn_id: index for index, rxn_id in enumerate(free_ids)}
+    if indicator_groups is not None:
+        groups: Dict[str, List[str]] = {}
+        seen: Dict[str, str] = {}
+        for key, members in indicator_groups.items():
+            wanted = list(dict.fromkeys(members))
+            if not wanted:
+                raise SpectraError(
+                    f"Indicator group {key!r} is empty, so its binary would "
+                    f"govern nothing while still being counted."
+                )
+            unknown = [r for r in wanted if r not in order]
+            if unknown:
+                raise SpectraError(
+                    f"indicator_groups must name free reactions of the model, "
+                    f"but group {key!r} names {len(unknown)} that are not, for "
+                    f"example {sorted(unknown)[:5]}. A reaction given a "
+                    f"direction is already forced in and cannot also be "
+                    f"selected over."
+                )
+            for rxn_id in wanted:
+                if rxn_id in seen:
+                    raise SpectraError(
+                        f"{rxn_id!r} is in both group {seen[rxn_id]!r} and "
+                        f"group {key!r}, so which binary governs it is "
+                        f"ambiguous. Every reaction belongs to at most one."
+                    )
+                seen[rxn_id] = key
+            groups[key] = sorted(wanted, key=order.__getitem__)
+        return groups, set(free_ids) - set(seen)
+
+    if indicator_reactions is None:
+        return {rxn_id: [rxn_id] for rxn_id in free_ids}, set()
+
+    wanted = set(indicator_reactions)
+    unknown = wanted - set(free_ids)
+    if unknown:
+        raise SpectraError(
+            f"indicator_reactions must be free reactions of the model, "
+            f"but {len(unknown)} are not, for example "
+            f"{sorted(unknown)[:5]}. A reaction given a direction is "
+            f"already forced in and cannot also be selected over."
+        )
+    chosen = [rxn_id for rxn_id in free_ids if rxn_id in wanted]
+    return {rxn_id: [rxn_id] for rxn_id in chosen}, set(free_ids) - wanted
 
 
 def _add_absolute_value_vars(
@@ -412,9 +526,23 @@ def _add_exclusion_constraints(
 
     Notes
     -----
-    For each previous solution, ``sum(z_i) <= |S| - 1`` over the free
-    reactions it contained, which rules out that exact set while allowing any
-    subset or superset.
+    For each previous solution, ``sum(z_i) <= |S| - 1`` over the indicators
+    it switched on. That rules out the set itself **and every superset of
+    it**, since a superset has all of ``S`` on and so hits the same bound;
+    proper subsets stay available.
+
+    Excluding supersets costs nothing here and is arguably what you want.
+    Solutions of equal size can never contain one another, so no optimum is
+    lost; what is pruned is only a larger answer that keeps everything an
+    earlier one did.
+
+    The sum has to be written over the indicators rather than over the
+    reactions finally kept: a reaction swept in by the inclusion cutoff
+    while its binary was off would otherwise appear in ``S`` without being
+    counted, the sum would stay under the bound, and the same solution could
+    recur. With `indicator_groups` the keys are groups rather than
+    reactions, which is why :class:`MilpSolution` reports `selected` in
+    those terms.
 
     """
     if not previous_solutions:
@@ -507,6 +635,7 @@ def min_net_milp(
     previous_solutions: Optional[List[Set[str]]] = None,
     indicator_reactions: Optional[Iterable[str]] = None,
     inclusion_cutoff: Optional[float] = None,
+    indicator_groups: Optional[Mapping[str, Iterable[str]]] = None,
 ) -> MilpSolution:
     """Extract a model by minimising the weighted reaction count.
 
@@ -539,19 +668,35 @@ def min_net_milp(
     inclusion_cutoff : float, optional
         The absolute flux at which a reaction without an indicator counts as
         used (default ``tol * 1e-7``).
+    indicator_groups : dict of {str: iterable of str}, optional
+        Give the reactions of each group **one shared binary** instead of
+        one each, so that they are kept or dropped together and cost the
+        group's weight once however many of them there are. Mutually
+        exclusive with `indicator_reactions`. Any free reaction in no group
+        is kept regardless, as with `indicator_reactions`.
 
     Returns
     -------
     MilpSolution
-        The reactions to keep, and the ones the indicators selected.
+        The reactions to keep, and the indicator groups the solver
+        switched on.
 
     Notes
     -----
-    Each reaction with an indicator gets a binary :math:`z_i` tied to its
-    flux by :math:`lb_i z_i \\le v_i \\le ub_i z_i`, so :math:`z_i = 0` pins
-    the flux to zero, and the objective minimises :math:`\\sum_i w_i z_i`.
-    Unlike :func:`min_net_lp` this minimises the count exactly rather than
-    its L1 relaxation, but it is a MILP and so far more expensive.
+    Each indicator gets a binary :math:`z_g` tied to the flux of every
+    reaction it governs by :math:`lb_i z_g \\le v_i \\le ub_i z_g`, so
+    :math:`z_g = 0` pins all of them to zero at once, and the objective
+    minimises :math:`\\sum_g w_g z_g`. With the default one binary per
+    reaction each group has a single member and this is the usual
+    formulation. Unlike :func:`min_net_lp` it minimises the count exactly
+    rather than its L1 relaxation, but it is a MILP and so far more
+    expensive.
+
+    Sharing a binary is what expresses a requirement that holds in several
+    conditions at once. Replicate the network once per condition, group
+    each reaction's copies together, and the objective counts reactions
+    while the constraints are satisfied separately in every condition.
+    That is what :func:`~spectra_cobra.minimal_reactome` does.
 
     Reactions left without an indicator keep their own bounds and are always
     included: nothing is deciding whether to keep them, so nothing should
@@ -559,21 +704,17 @@ def min_net_milp(
 
     """
     free_ids = _free_reaction_ids(model, directions)
-    if indicator_reactions is None:
-        indicator_ids = list(free_ids)
-        always_keep: Set[str] = set()
-    else:
-        wanted = set(indicator_reactions)
-        unknown = wanted - set(free_ids)
-        if unknown:
-            raise SpectraError(
-                f"indicator_reactions must be free reactions of the model, "
-                f"but {len(unknown)} are not, for example "
-                f"{sorted(unknown)[:5]}. A reaction given a direction is "
-                f"already forced in and cannot also be selected over."
-            )
-        indicator_ids = [r for r in free_ids if r in wanted]
-        always_keep = set(free_ids) - wanted
+    groups, always_keep = _resolve_indicator_groups(
+        free_ids, indicator_reactions, indicator_groups
+    )
+    missing = sorted(key for key in groups if key not in weights)
+    if missing:
+        raise SpectraError(
+            f"{len(missing)} indicator group(s) have no weight, for example "
+            f"{missing[:5]}. What a group costs to keep is looked up by its "
+            f"own key, which for the default one-binary-per-reaction case is "
+            f"the reaction identifier."
+        )
     signs = reaction_signs(model)
     prob = model.problem
 
@@ -582,40 +723,44 @@ def min_net_milp(
 
         indicators = {}
         to_add = []
-        for rxn_id in indicator_ids:
-            reaction = model.reactions.get_by_id(rxn_id)
-            var = prob.Variable(f"spectra_z_{rxn_id}", type="binary")
-            indicators[rxn_id] = var
-            # lb_i z_i <= v_i <= ub_i z_i. This pair is unaffected by the
-            # orientation: negating both the flux and the swapped bounds
-            # reproduces the same inequalities.
-            to_add.extend(
-                [
-                    var,
-                    prob.Constraint(
-                        reaction.flux_expression - reaction.lower_bound * var,
-                        name=f"spectra_z_lower_{rxn_id}",
-                        lb=0.0,
-                    ),
-                    prob.Constraint(
-                        reaction.flux_expression - reaction.upper_bound * var,
-                        name=f"spectra_z_upper_{rxn_id}",
-                        ub=0.0,
-                    ),
-                ]
-            )
+        for key, members in groups.items():
+            var = prob.Variable(f"spectra_z_{key}", type="binary")
+            indicators[key] = var
+            to_add.append(var)
+            for rxn_id in members:
+                reaction = model.reactions.get_by_id(rxn_id)
+                # lb_i z_g <= v_i <= ub_i z_g. This pair is unaffected by the
+                # orientation: negating both the flux and the swapped bounds
+                # reproduces the same inequalities. One binary over several
+                # reactions pins all of them at once.
+                to_add.extend(
+                    [
+                        prob.Constraint(
+                            reaction.flux_expression - reaction.lower_bound * var,
+                            name=f"spectra_z_lower_{rxn_id}",
+                            lb=0.0,
+                        ),
+                        prob.Constraint(
+                            reaction.flux_expression - reaction.upper_bound * var,
+                            name=f"spectra_z_upper_{rxn_id}",
+                            ub=0.0,
+                        ),
+                    ]
+                )
         model.add_cons_vars(to_add)
         _add_exclusion_constraints(model, indicators, previous_solutions)
 
         model.objective = prob.Objective(Zero, direction="min")
         model.objective.set_linear_coefficients(
-            {indicators[r]: float(weights[r]) for r in indicator_ids}
+            {indicators[key]: float(weights[key]) for key in groups}
         )
         _set_time_limit(model, time_limit)
 
         model.slim_optimize()
         _check_status(model, "minNetMILP problem", milp=True)
-        solution = _milp_solution(model, directions, indicators, tol, inclusion_cutoff)
+        solution = _milp_solution(
+            model, directions, indicators, groups, tol, inclusion_cutoff
+        )
         return MilpSolution(
             included=solution.included | always_keep, selected=solution.selected
         )
@@ -686,20 +831,14 @@ def trade_off(
 
     """
     free_ids = _free_reaction_ids(model, directions)
-    if indicator_reactions is None:
-        indicator_ids = list(free_ids)
-        always_keep: Set[str] = set()
-    else:
-        wanted = set(indicator_reactions)
-        unknown = wanted - set(free_ids)
-        if unknown:
-            raise SpectraError(
-                f"indicator_reactions must be free reactions of the model, "
-                f"but {len(unknown)} are not, for example "
-                f"{sorted(unknown)[:5]}."
-            )
-        indicator_ids = [r for r in free_ids if r in wanted]
-        always_keep = set(free_ids) - wanted
+    # tradeOff gives a reversible reaction two further binaries of its own,
+    # so a shared one would have to govern those too; it takes
+    # indicator_reactions only, and the resolver is used just for the
+    # validation and the always-keep set.
+    one_each, always_keep = _resolve_indicator_groups(
+        free_ids, indicator_reactions, None
+    )
+    indicator_ids = list(one_each)
     signs = reaction_signs(model)
     prob = model.problem
 
@@ -773,7 +912,9 @@ def trade_off(
 
         model.slim_optimize()
         _check_status(model, "tradeOff problem", milp=True)
-        solution = _milp_solution(model, directions, indicators, tol, inclusion_cutoff)
+        solution = _milp_solution(
+            model, directions, indicators, one_each, tol, inclusion_cutoff
+        )
         return MilpSolution(
             included=solution.included | always_keep, selected=solution.selected
         )
