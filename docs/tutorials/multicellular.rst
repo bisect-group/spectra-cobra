@@ -32,6 +32,37 @@ pool that exists purely to link two tissues must stay closed, or those two
 could dump metabolites straight out of the system and bypass everything
 else.
 
+Every diagram on this page uses the same five shapes:
+
+.. graphviz::
+   :align: center
+
+   digraph legend {
+     rankdir=LR; bgcolor="transparent"; nodesep=0.18; ranksep=0.30;
+     node [fontname="Helvetica", fontsize=9.5];
+     edge [style=invis];
+
+     met  [label="metabolite\nin a unit", shape=ellipse, style=filled,
+           fillcolor="#e8f0fa", color="#3c6997", fontcolor="#1b3a57"];
+     pool [label="pooled\nmetabolite", shape=ellipse, style=filled,
+           fillcolor="#fdf0e3", color="#c07d2a", fontcolor="#6b4411",
+           penwidth=1.6];
+     rxn  [label="reaction", shape=box, style="filled,rounded",
+           fillcolor="#ffffff", color="#3c6997", fontcolor="#1b3a57",
+           height=0.34];
+     gone [label="reaction a\ndraft lacks", shape=box,
+           style="filled,rounded,dashed", fillcolor="#fdf2ef", color="#b3411f",
+           fontcolor="#b3411f", height=0.34];
+     unit [label="a unit", shape=box, style="rounded,filled",
+           fillcolor="#f6f9fd", color="#c7d6e8", fontcolor="#3c6997",
+           height=0.34];
+
+     met -> pool -> rxn -> gone -> unit;
+   }
+
+Blue is private to a unit, orange is shared, and a dashed red outline marks
+something a draft does not have.
+
 Note what has to *go*: each unit's own exchange reactions are removed. A
 draft model has ``EX_glc_e`` so it can eat; leave that in place and every
 unit feeds itself directly from the environment, the pool is decorative, and
@@ -50,43 +81,45 @@ transport reaction carries each metabolite between it and the pool:
    :align: center
 
    digraph pooled {
-     rankdir=LR;
-     bgcolor="transparent";
+     rankdir=LR; bgcolor="transparent"; compound=true; nodesep=0.28; ranksep=0.5;
      node [fontname="Helvetica", fontsize=10];
-     edge [fontname="Helvetica", fontsize=9, color="#555555", arrowsize=0.7];
-     compound=true;
-
-     node [shape=ellipse, style=filled, fillcolor="#e8f0fa",
-           color="#3c6997", fontcolor="#1b3a57"];
-     glcA [label="glc[e]__A"];
-     glcB [label="glc[e]__B"];
-     node [fillcolor="#fdf0e3", color="#c07d2a", fontcolor="#6b4411"];
-     pool [label="glc_u"];
-
-     node [shape=box, width=0.32, height=0.24, style=filled,
-           fillcolor="#f7f7f7", color="#999999", fontcolor="#333333"];
-     trA [label="TR_glc_u__A"];
-     trB [label="TR_glc_u__B"];
-     ex  [label="EX_glc_u"];
-
-     node [shape=point, width=0.05, color="#bbbbbb"];
-     env;
+     edge [fontname="Helvetica", fontsize=9, color="#6b7280", arrowsize=0.7];
 
      subgraph cluster_a {
-       label="unit A"; color="#cccccc"; fontname="Helvetica"; fontsize=9;
-       glcA;
+       label="unit A"; labeljust=l; fontname="Helvetica"; fontsize=9;
+       fontcolor="#3c6997"; color="#c7d6e8"; style="rounded,filled";
+       fillcolor="#f6f9fd"; margin=10;
+       glcA [label="glc[e]", shape=ellipse, style=filled, fillcolor="#e8f0fa",
+             color="#3c6997", fontcolor="#1b3a57"];
+       trA  [label="TR_glc_u", shape=box, style="filled,rounded", width=0.9,
+             height=0.26, fillcolor="#ffffff", color="#3c6997",
+             fontcolor="#1b3a57"];
+       glcA -> trA [dir=both];
      }
      subgraph cluster_b {
-       label="unit B"; color="#cccccc"; fontname="Helvetica"; fontsize=9;
-       glcB;
+       label="unit B"; labeljust=l; fontname="Helvetica"; fontsize=9;
+       fontcolor="#3c6997"; color="#c7d6e8"; style="rounded,filled";
+       fillcolor="#f6f9fd"; margin=10;
+       glcB [label="glc[e]", shape=ellipse, style=filled, fillcolor="#e8f0fa",
+             color="#3c6997", fontcolor="#1b3a57"];
+       trB  [label="TR_glc_u", shape=box, style="filled,rounded", width=0.9,
+             height=0.26, fillcolor="#ffffff", color="#3c6997",
+             fontcolor="#1b3a57"];
+       glcB -> trB [dir=both];
      }
 
-     glcA -> trA [dir=both];
-     trA  -> pool [dir=both];
-     glcB -> trB [dir=both];
-     trB  -> pool [dir=both];
-     pool -> ex [dir=both];
-     ex -> env [style=dashed, color="#bbbbbb"];
+     pool [label="glc_u", shape=ellipse, style=filled, fillcolor="#fdf0e3",
+           color="#c07d2a", fontcolor="#6b4411", penwidth=1.6];
+     ex   [label="EX_glc_u", shape=box, style="filled,rounded", width=0.9,
+           height=0.26, fillcolor="#ffffff", color="#c07d2a",
+           fontcolor="#6b4411"];
+     env  [label="environment", shape=plaintext, fontcolor="#9ca3af",
+           fontsize=9];
+
+     trA -> pool [dir=both, color="#c07d2a"];
+     trB -> pool [dir=both, color="#c07d2a"];
+     pool -> ex [dir=both, color="#c07d2a"];
+     ex -> env [dir=both, style=dashed, color="#c9ced6"];
    }
 
 ``mode="shared"`` — the units share the external compartment itself. One row
@@ -94,31 +127,45 @@ of the stoichiometric matrix per exchangeable metabolite, for the whole
 community, and no transports at all:
 
 .. graphviz::
-   :caption: ``mode="shared"``. There is one ``glc[e]`` and both units use
-             it. Smaller, but there is no per-unit reaction left to bound.
+   :caption: ``mode="shared"``. There is one ``glc[e]`` and both units
+             reach it directly. Smaller, but with no transport between unit
+             and pool there is nothing for ``link_bounds`` to attach a
+             per-unit uptake rate to.
    :align: center
 
    digraph shared {
-     rankdir=LR;
-     bgcolor="transparent";
+     rankdir=LR; bgcolor="transparent"; compound=true; nodesep=0.28; ranksep=0.5;
      node [fontname="Helvetica", fontsize=10];
-     edge [fontname="Helvetica", fontsize=9, color="#555555", arrowsize=0.7];
+     edge [fontname="Helvetica", fontsize=9, color="#6b7280", arrowsize=0.7];
 
-     node [shape=box, width=0.32, height=0.24, style=filled,
-           fillcolor="#f7f7f7", color="#999999", fontcolor="#333333"];
-     upA [label="UP__A"]; upB [label="UP__B"]; ex [label="EX_glc[e]"];
+     subgraph cluster_a {
+       label="unit A"; labeljust=l; fontname="Helvetica"; fontsize=9;
+       fontcolor="#3c6997"; color="#c7d6e8"; style="rounded,filled";
+       fillcolor="#f6f9fd"; margin=10;
+       upA [label="UP", shape=box, style="filled,rounded", width=0.7,
+            height=0.26, fillcolor="#ffffff", color="#3c6997",
+            fontcolor="#1b3a57"];
+     }
+     subgraph cluster_b {
+       label="unit B"; labeljust=l; fontname="Helvetica"; fontsize=9;
+       fontcolor="#3c6997"; color="#c7d6e8"; style="rounded,filled";
+       fillcolor="#f6f9fd"; margin=10;
+       upB [label="UP", shape=box, style="filled,rounded", width=0.7,
+            height=0.26, fillcolor="#ffffff", color="#3c6997",
+            fontcolor="#1b3a57"];
+     }
 
-     node [shape=ellipse, style=filled, fillcolor="#fdf0e3",
-           color="#c07d2a", fontcolor="#6b4411"];
-     pool [label="glc[e]"];
+     pool [label="glc[e]", shape=ellipse, style=filled, fillcolor="#fdf0e3",
+           color="#c07d2a", fontcolor="#6b4411", penwidth=1.6];
+     ex   [label="EX_glc[e]", shape=box, style="filled,rounded", width=0.9,
+           height=0.26, fillcolor="#ffffff", color="#c07d2a",
+           fontcolor="#6b4411"];
+     env  [label="environment", shape=plaintext, fontcolor="#9ca3af", fontsize=9];
 
-     node [shape=point, width=0.05, color="#bbbbbb"];
-     env;
-
-     pool -> upA [dir=both];
-     pool -> upB [dir=both];
-     pool -> ex [dir=both];
-     ex -> env [style=dashed, color="#bbbbbb"];
+     upA -> pool [dir=both, color="#c07d2a"];
+     upB -> pool [dir=both, color="#c07d2a"];
+     pool -> ex [dir=both, color="#c07d2a"];
+     ex -> env [dir=both, style=dashed, color="#c9ced6"];
    }
 
 Which to use:
@@ -218,29 +265,62 @@ A four-step chain, ``glc → a → b → c``, with an anchor that consumes ``c``
 Two drafts each hold part of it:
 
 .. graphviz::
-   :caption: ``A`` can reach ``b`` and export it but cannot finish; ``B``
-             can finish but cannot start. Dashed reactions are the ones
-             each draft is missing.
+   :caption: The same chain seen twice, once per draft. Dashed red is what
+             that draft lacks: ``A`` gets as far as ``b`` but cannot make
+             ``c``, and ``B`` can finish but cannot start. The pool ``b_u``
+             is how ``A`` hands ``b`` to ``B``.
    :align: center
 
    digraph chain {
-     rankdir=LR;
-     bgcolor="transparent";
+     rankdir=LR; bgcolor="transparent"; nodesep=0.22; ranksep=0.34;
      node [fontname="Helvetica", fontsize=10];
-     edge [fontname="Helvetica", fontsize=9, color="#555555", arrowsize=0.7];
+     edge [fontname="Helvetica", fontsize=9, color="#6b7280", arrowsize=0.6];
 
-     node [shape=ellipse, style=filled, fillcolor="#e8f0fa",
-           color="#3c6997", fontcolor="#1b3a57"];
-     glc; a; b; c;
+     node [shape=ellipse, style=filled, fillcolor="#e8f0fa", color="#3c6997",
+           fontcolor="#1b3a57", width=0.34, height=0.30];
+     node [shape=box, style="filled,rounded", width=0.56, height=0.26,
+           fillcolor="#ffffff", color="#3c6997", fontcolor="#1b3a57"];
 
-     node [shape=box, width=0.3, height=0.22, style=filled,
-           fillcolor="#f7f7f7", color="#999999", fontcolor="#333333"];
-     UP; R1; R2; BIO;
+     subgraph cluster_a {
+       label="draft A — starts, cannot finish"; labeljust=l;
+       fontname="Helvetica"; fontsize=9; fontcolor="#3c6997";
+       color="#c7d6e8"; style="rounded,filled"; fillcolor="#f6f9fd"; margin=10;
+       gA [label="glc", shape=ellipse, fillcolor="#e8f0fa"];
+       aA [label="a", shape=ellipse, fillcolor="#e8f0fa"];
+       bA [label="b", shape=ellipse, fillcolor="#e8f0fa"];
+       cA [label="c", shape=ellipse, fillcolor="#e8f0fa"];
+       UPa [label="UP"]; R1a [label="R1"]; BIOa [label="BIO"];
+       R2a [label="R2", style="filled,rounded,dashed", color="#b3411f",
+            fontcolor="#b3411f", fillcolor="#fdf2ef"];
+       gA -> UPa -> aA -> R1a -> bA;
+       bA -> R2a [style=dashed, color="#d8b2a6"];
+       R2a -> cA [style=dashed, color="#d8b2a6"];
+       cA -> BIOa;
+     }
+     subgraph cluster_b {
+       label="draft B — finishes, cannot start"; labeljust=l;
+       fontname="Helvetica"; fontsize=9; fontcolor="#3c6997";
+       color="#c7d6e8"; style="rounded,filled"; fillcolor="#f6f9fd"; margin=10;
+       gB [label="glc", shape=ellipse, fillcolor="#e8f0fa"];
+       aB [label="a", shape=ellipse, fillcolor="#e8f0fa"];
+       bB [label="b", shape=ellipse, fillcolor="#e8f0fa"];
+       cB [label="c", shape=ellipse, fillcolor="#e8f0fa"];
+       R2b [label="R2"]; BIOb [label="BIO"];
+       UPb [label="UP", style="filled,rounded,dashed", color="#b3411f",
+            fontcolor="#b3411f", fillcolor="#fdf2ef"];
+       R1b [label="R1", style="filled,rounded,dashed", color="#b3411f",
+            fontcolor="#b3411f", fillcolor="#fdf2ef"];
+       gB -> UPb [style=dashed, color="#d8b2a6"];
+       UPb -> aB [style=dashed, color="#d8b2a6"];
+       aB -> R1b [style=dashed, color="#d8b2a6"];
+       R1b -> bB [style=dashed, color="#d8b2a6"];
+       bB -> R2b -> cB -> BIOb;
+     }
 
-     glc -> UP -> a -> R1 -> b -> R2 -> c -> BIO;
-     b -> EXP [label=" to the pool", fontcolor="#c07d2a"];
-     EXP [shape=box, width=0.3, height=0.22, style=filled,
-          fillcolor="#fdf0e3", color="#c07d2a", fontcolor="#6b4411"];
+     pool [label="b_u", shape=ellipse, style=filled, fillcolor="#fdf0e3",
+           color="#c07d2a", fontcolor="#6b4411", penwidth=1.6];
+     bA -> pool [dir=both, color="#c07d2a", constraint=false];
+     pool -> bB [dir=both, color="#c07d2a", constraint=false];
    }
 
 Build the community. Each unit is backed by a *database* — everything it is
@@ -434,26 +514,37 @@ only ever meets ``tis2``:
    :align: center
 
    digraph tissues {
-     rankdir=LR;
-     bgcolor="transparent";
+     rankdir=LR; bgcolor="transparent"; nodesep=0.35; ranksep=0.55;
      node [fontname="Helvetica", fontsize=10];
-     edge [fontname="Helvetica", fontsize=9, color="#555555", arrowsize=0.7,
+     edge [fontname="Helvetica", fontsize=9, color="#c07d2a", arrowsize=0.7,
            dir=both];
 
-     node [shape=box, style="filled,rounded", fillcolor="#e8f0fa",
-           color="#3c6997", fontcolor="#1b3a57"];
+     node [shape=box, style="filled,rounded", fillcolor="#f6f9fd",
+           color="#3c6997", fontcolor="#1b3a57", width=0.8, height=0.34];
      tis1; tis2; tis3;
 
-     node [shape=ellipse, style=filled, fillcolor="#fdf0e3",
-           color="#c07d2a", fontcolor="#6b4411"];
-     Bl [label="Bl"]; iface [label="tis2_tis3"];
+     node [shape=ellipse, style=filled, fillcolor="#fdf0e3", color="#c07d2a",
+           fontcolor="#6b4411", penwidth=1.6];
+     Bl    [label="Bl"];
+     iface [label="tis2_tis3"];
 
-     node [shape=point, width=0.05, color="#bbbbbb"];
-     env;
+     ex  [label="EX_*_Bl", shape=box, style="filled,rounded", width=0.8,
+          height=0.26, fillcolor="#ffffff", color="#c07d2a",
+          fontcolor="#6b4411"];
+     env [label="environment", shape=plaintext, style="", fillcolor="transparent",
+          fontcolor="#9ca3af", fontsize=9];
 
-     tis1 -> Bl; tis2 -> Bl;
-     tis2 -> iface; tis3 -> iface;
-     Bl -> env [style=dashed, color="#bbbbbb", label=" exchanges"];
+     tis1 -> Bl;
+     tis2 -> Bl;
+     tis2 -> iface;
+     tis3 -> iface;
+     Bl -> ex;
+     ex -> env [style=dashed, color="#c9ced6"];
+
+     shut [label="no exchanges —\nclosed to the outside", shape=plaintext,
+           style="", fillcolor="transparent", fontcolor="#b3411f", fontsize=8.5];
+     iface -> shut [dir=none, style=dotted, color="#d8b2a6"];
+     { rank=same; ex; shut; }
    }
 
 .. code-block:: python

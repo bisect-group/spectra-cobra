@@ -57,28 +57,27 @@ experiment uses. Note the coefficient ``n``:
    :align: center
 
    digraph topology_toy {
-     rankdir=LR;
-     bgcolor="transparent";
+     rankdir=LR; bgcolor="transparent"; nodesep=0.24; ranksep=0.40;
      node [fontname="Helvetica", fontsize=10];
-     edge [fontname="Helvetica", fontsize=9, color="#555555",
-           arrowsize=0.7];
+     edge [fontname="Helvetica", fontsize=9, color="#6b7280", arrowsize=0.65];
 
-     node [shape=ellipse, style=filled, fillcolor="#e8f0fa",
-           color="#3c6997", fontcolor="#1b3a57"];
+     node [shape=ellipse, style=filled, fillcolor="#e8f0fa", color="#3c6997",
+           fontcolor="#1b3a57", width=0.34, height=0.30];
      S; a; b; c; d; T1;
 
-     node [shape=box, width=0.32, height=0.24, style=filled,
-           fillcolor="#f7f7f7", color="#999999", fontcolor="#333333"];
+     node [shape=box, style="filled,rounded", width=0.44, height=0.26,
+           fillcolor="#ffffff", color="#3c6997", fontcolor="#1b3a57"];
      r1; r2; r3; r4; r5; r6;
 
-     node [shape=point, width=0.05, color="#bbbbbb"];
-     src; sink;
+     node [shape=plaintext, style="", fillcolor="transparent",
+           fontcolor="#9ca3af", fontsize=9];
+     src [label="medium"]; sink [label="out"];
 
-     src -> r1 [style=dashed, color="#bbbbbb"];
+     src -> r1 [style=dashed, color="#c9ced6"];
      r1 -> S;
      S  -> r2;
      r2 -> b;
-     r2 -> a [label=" n", fontcolor="#b3411f", color="#b3411f"];
+     r2 -> a [label=" n ", fontcolor="#b3411f", color="#b3411f", penwidth=1.5];
      b  -> r3;
      a  -> r3;
      r3 -> d;
@@ -88,7 +87,7 @@ experiment uses. Note the coefficient ``n``:
      c  -> r5;
      r5 -> T1;
      T1 -> r6;
-     r6 -> sink [style=dashed, color="#bbbbbb"];
+     r6 -> sink [style=dashed, color="#c9ced6"];
    }
 
 .. code-block:: text
@@ -128,54 +127,60 @@ Every reaction here has one substrate and one product, so the metabolites
 alone are enough to draw it. Only the arrow on ``r3`` differs:
 
 .. graphviz::
-   :caption: Left, ``C`` is produced and never consumed — a dead end that
-             accumulation rescues. Right, ``C`` is consumed and never
-             produced — a gap that it cannot.
+   :caption: The only difference is which way ``r3`` points. Produced and
+             never consumed, ``C`` is a dead end that accumulation
+             rescues; consumed and never produced, it is a gap that
+             nothing can.
    :align: center
 
    digraph cc_toys {
-     bgcolor="transparent";
-     node [shape=ellipse, style=filled, fillcolor="#e8f0fa",
-           color="#3c6997", fontcolor="#1b3a57",
-           fontname="Helvetica", fontsize=10];
-     edge [fontname="Helvetica", fontsize=9, color="#555555",
-           arrowsize=0.7];
+     bgcolor="transparent"; rankdir=LR; nodesep=0.22; ranksep=0.38;
+     node [fontname="Helvetica", fontsize=10];
+     edge [fontname="Helvetica", fontsize=9, color="#6b7280", arrowsize=0.65];
 
      subgraph cluster_produced {
-       label="C produced, never consumed";
-       fontname="Helvetica"; fontsize=10; fontcolor="#555555";
-       color="#cccccc"; style=rounded;
-       node [shape=point, width=0.05, color="#bbbbbb"];
-       in1; out1;
-       node [shape=ellipse, width=0.4];
-       A1 [label="A"]; B1 [label="B"]; C1 [label="C"];
-       D1 [label="D"]; E1 [label="E"]; F1 [label="F"];
-       in1 -> A1 [label=" r1", style=dashed, color="#bbbbbb"];
+       label="C produced, never consumed  —  rescued by accumulation";
+       labeljust=l; fontname="Helvetica"; fontsize=9; fontcolor="#3c6997";
+       color="#c7d6e8"; style="rounded,filled"; fillcolor="#f6f9fd"; margin=10;
+       node [shape=plaintext, style="", fillcolor="transparent",
+             fontcolor="#9ca3af", fontsize=8.5];
+       in1 [label="medium"]; out1 [label="out"];
+       node [shape=ellipse, style=filled, fillcolor="#e8f0fa", color="#3c6997",
+             fontcolor="#1b3a57", width=0.36, height=0.32];
+       A1 [label="A"]; B1 [label="B"]; D1 [label="D"];
+       E1 [label="E"]; F1 [label="F"];
+       C1 [label="C", fillcolor="#fdf2ef", color="#b3411f",
+           fontcolor="#b3411f", penwidth=1.6];
+       in1 -> A1 [label=" r1", style=dashed, color="#c9ced6"];
        A1 -> B1 [label=" r2"];
        B1 -> C1 [label=" r3", color="#b3411f", fontcolor="#b3411f",
                  penwidth=1.6];
        B1 -> D1 [label=" r4"];
-       D1 -> out1 [label=" r5", style=dashed, color="#bbbbbb"];
+       D1 -> out1 [label=" r5", style=dashed, color="#c9ced6"];
        A1 -> E1 [label=" r6"];
        E1 -> F1 [label=" r7"];
        F1 -> D1 [label=" r8"];
      }
 
      subgraph cluster_consumed {
-       label="C consumed, never produced";
-       fontname="Helvetica"; fontsize=10; fontcolor="#555555";
-       color="#cccccc"; style=rounded;
-       node [shape=point, width=0.05, color="#bbbbbb"];
-       in2; out2;
-       node [shape=ellipse, width=0.4];
-       A2 [label="A"]; B2 [label="B"]; C2 [label="C"];
-       D2 [label="D"]; E2 [label="E"]; F2 [label="F"];
-       in2 -> A2 [label=" r1", style=dashed, color="#bbbbbb"];
+       label="C consumed, never produced  —  a gap nothing rescues";
+       labeljust=l; fontname="Helvetica"; fontsize=9; fontcolor="#3c6997";
+       color="#c7d6e8"; style="rounded,filled"; fillcolor="#f6f9fd"; margin=10;
+       node [shape=plaintext, style="", fillcolor="transparent",
+             fontcolor="#9ca3af", fontsize=8.5];
+       in2 [label="medium"]; out2 [label="out"];
+       node [shape=ellipse, style=filled, fillcolor="#e8f0fa", color="#3c6997",
+             fontcolor="#1b3a57", width=0.36, height=0.32];
+       A2 [label="A"]; B2 [label="B"]; D2 [label="D"];
+       E2 [label="E"]; F2 [label="F"];
+       C2 [label="C", fillcolor="#fdf2ef", color="#b3411f",
+           fontcolor="#b3411f", penwidth=1.6];
+       in2 -> A2 [label=" r1", style=dashed, color="#c9ced6"];
        A2 -> B2 [label=" r2"];
        C2 -> B2 [label=" r3", color="#b3411f", fontcolor="#b3411f",
                  penwidth=1.6];
        B2 -> D2 [label=" r4"];
-       D2 -> out2 [label=" r5", style=dashed, color="#bbbbbb"];
+       D2 -> out2 [label=" r5", style=dashed, color="#c9ced6"];
        A2 -> E2 [label=" r6"];
        E2 -> F2 [label=" r7"];
        F2 -> D2 [label=" r8"];
