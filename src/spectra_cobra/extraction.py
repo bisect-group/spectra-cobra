@@ -67,6 +67,11 @@ ALT_SOLUTION_METHODS = (CORE_DIRECTION, PATHWAY_EXCLUSION)
 #: direction settled.
 DIRECTION_CUTOFF_FACTOR = 1e-1
 
+#: How many times to redraw the objective weights when an iteration of the
+#: direction-settling loop moves nothing. Coupled reactions settle on some
+#: draws and not others, so one failure says little.
+DIRECTION_ATTEMPTS = 5
+
 #: The range the convex combination weight is drawn from when blending the
 #: flux of successive iterations.
 BLEND_RANGE = (0.45, 0.55)
@@ -244,6 +249,7 @@ def _settle_core_directions(
     tol: float,
     rng: np.random.Generator,
     swap_order: bool = False,
+    core_is_known_live: bool = False,
 ) -> Dict[str, float]:
     """Find a flux vector giving every core reaction a direction.
 
@@ -264,6 +270,12 @@ def _settle_core_directions(
         Whether to try the reverse LP before the forward one, which is how
         the ``coreDirection`` alternative-solution method explores different
         directions (default False).
+    core_is_known_live : bool, optional
+        Whether the caller has already established that every core reaction
+        can carry flux, as ``spectra_ccme`` has by the time it gets here
+        (default False). It only changes what the failure says: suggesting
+        the core might be blocked would be wrong advice from a routine that
+        just finished checking.
 
     Returns
     -------
@@ -281,7 +293,9 @@ def _settle_core_directions(
     cutoff = tol * DIRECTION_CUTOFF_FACTOR
     first, second = (reverse, forward) if swap_order else (forward, reverse)
 
+    stalls = 0
     while unsettled:
+        remaining = len(unsettled)
         with model:
             fluxes = first(model, unsettled, signs, tol, rng)
         if fluxes is None:
@@ -297,16 +311,39 @@ def _settle_core_directions(
         if fluxes is None:
             fluxes = {rxn.id: 0.0 for rxn in model.reactions}
         accumulated = _blend(accumulated, fluxes, rng)
-        settled = carrying_flux({r: accumulated[r] for r in unsettled}, cutoff)
-        if not settled:
+        unsettled -= carrying_flux({r: accumulated[r] for r in unsettled}, cutoff)
+
+        if len(unsettled) < remaining:
+            stalls = 0
+            continue
+        # Neither LP moved anything this time round. That is not proof the
+        # reactions cannot be settled: two reactions coupled through a
+        # metabolite nothing else touches have to run in opposite senses, so
+        # one LP pays for the other, and whether settling them beats leaving
+        # them at zero depends on which random objective weights they drew.
+        # On Recon3D's estriol and cholesterol-ester transport pairs, 8 draws
+        # in 12 make progress. So draw again before giving up.
+        stalls += 1
+        if stalls > DIRECTION_ATTEMPTS:
+            detail = (
+                ""
+                if core_is_known_live
+                else (
+                    " Either they are blocked in the model as given -- "
+                    "spectra_me requires a flux consistent model, so run "
+                    "spectra_cc first or use spectra_ccme, which drops a "
+                    "blocked core reaction instead of failing -- or the "
+                    "weights were unlucky, in which case another seed settles "
+                    "them."
+                )
+            )
             raise SpectraError(
                 f"{len(unsettled)} core reaction(s) could not be given a flux "
-                f"direction, for example {sorted(unsettled)[:5]}. Their "
-                f"accumulated flux stays below {cutoff:.3g}, which can happen "
-                f"when the convex combination of two iterations cancels out; "
-                f"retry with a different seed."
+                f"direction in {DIRECTION_ATTEMPTS} attempts, for example "
+                f"{sorted(unsettled)[:5]}. Their accumulated flux stays below "
+                f"{cutoff:.3g}. Reactions that can only carry flux together, "
+                f"in opposite directions, are the usual cause.{detail}"
             )
-        unsettled -= settled
 
     return accumulated
 
@@ -635,6 +672,7 @@ def _spectra_me(
     inclusion_cutoff: Optional[float] = None,
     indicator_reactions: Optional[Iterable[str]] = None,
     indicator_groups: Optional[Mapping[str, Iterable[str]]] = None,
+    core_is_known_live: bool = False,
 ) -> Tuple[List["Model"], List[MilpSolution]]:
     """Run the extraction, returning the models and the solutions found.
 
@@ -706,7 +744,13 @@ def _spectra_me(
         if index == 0 or alt_solution_method == CORE_DIRECTION:
             with model, relaxed_mass_balance(model, steady_state):
                 fluxes = _settle_core_directions(
-                    model, core_ids, signs, tol, rng, swap_order
+                    model,
+                    core_ids,
+                    signs,
+                    tol,
+                    rng,
+                    swap_order,
+                    core_is_known_live=core_is_known_live,
                 )
             directions = _directions_from_flux(model, fluxes or {}, core_ids, signs)
 
@@ -916,5 +960,8 @@ def spectra_ccme(
             else None
         ),
         seed=None if seed is None else seed + 1,
+        # The blocked core reactions have already been dropped above, so a
+        # settling failure here is not evidence of an inconsistent model.
+        core_is_known_live=True,
     )
     return [first] + rest, blocked_core

@@ -2,6 +2,7 @@
 
 from typing import List
 
+import numpy as np
 import pytest
 from cobra import Model
 
@@ -562,3 +563,108 @@ def test_extraction_keeps_gene_annotations_when_genes_are_kept(
     for gene in extracted.genes:
         original = toy_model.genes.get_by_id(gene.id)
         assert gene.annotation == original.annotation, gene.id
+
+
+# --------------------------------------------------------------------------
+# Settling core directions.
+#
+# The two LPs push every unsettled reaction the same way, so a pair of
+# reactions coupled through a metabolite nothing else touches -- one able to
+# run only forwards, the other only backwards -- can only be settled when the
+# random objective weights happen to favour paying for one with the other. On
+# Recon3D's estriol and cholesterol-ester transport pairs, 8 draws in 12 make
+# progress. Giving up on the first unlucky draw aborted extractions that one
+# more round would have finished.
+# --------------------------------------------------------------------------
+
+
+def _settler(monkeypatch, forward_settles, reverse_settles):
+    """Stub both LPs so the test decides what each one settles."""
+    from spectra_cobra import extraction
+
+    rounds = {"forward": 0, "reverse": 0}
+
+    def stub(which, settles):
+        def run(model, unsettled, signs, tol, rng, *args, **kwargs):
+            rounds[which] += 1
+            chosen = settles(sorted(unsettled), rounds[which])
+            return {rxn.id: (1.0 if rxn.id in chosen else 0.0)
+                    for rxn in model.reactions}
+        return run
+
+    monkeypatch.setattr(extraction, "forward",
+                        stub("forward", forward_settles))
+    monkeypatch.setattr(extraction, "reverse",
+                        stub("reverse", reverse_settles))
+    return rounds
+
+
+def test_a_round_the_reverse_lp_cannot_move_is_not_a_failure(
+    toy_model: Model, monkeypatch
+) -> None:
+    """Progress by the forward LP carries the round.
+
+    The loop used to raise whenever the reverse LP settled nothing, even
+    though the forward LP had just settled reactions in the same round.
+    """
+    from spectra_cobra import extraction
+
+    rounds = _settler(
+        monkeypatch,
+        forward_settles=lambda left, _n: left[:1],   # one per round
+        reverse_settles=lambda left, _n: [],         # never anything
+    )
+    core = {"R1", "R2", "R3"}
+    fluxes = extraction._settle_core_directions(
+        toy_model, set(core), {r.id: 1.0 for r in toy_model.reactions},
+        1e-4, np.random.default_rng(0),
+    )
+    assert fluxes is not None
+    assert rounds["forward"] == len(core), (
+        "one round per core reaction, so the loop kept going"
+    )
+
+
+def test_a_core_that_never_settles_is_still_an_error(
+    toy_model: Model, monkeypatch
+) -> None:
+    """Redrawing is bounded. Without a cap a core that cannot be settled
+    would spin for ever rather than report anything."""
+    from spectra_cobra import extraction
+
+    rounds = _settler(
+        monkeypatch,
+        forward_settles=lambda left, _n: [],
+        reverse_settles=lambda left, _n: [],
+    )
+    with pytest.raises(SpectraError, match="could not be given a flux"):
+        extraction._settle_core_directions(
+            toy_model, {"R1"}, {r.id: 1.0 for r in toy_model.reactions},
+            1e-4, np.random.default_rng(0),
+        )
+    assert rounds["forward"] == extraction.DIRECTION_ATTEMPTS + 1
+
+
+def test_the_failure_only_blames_the_model_when_that_is_possible(
+    toy_model: Model, monkeypatch
+) -> None:
+    """``spectra_ccme`` drops blocked core reactions before it gets here, so
+    telling it the core may be blocked would be wrong."""
+    from spectra_cobra import extraction
+
+    _settler(monkeypatch,
+             forward_settles=lambda left, _n: [],
+             reverse_settles=lambda left, _n: [])
+    signs = {r.id: 1.0 for r in toy_model.reactions}
+
+    with pytest.raises(SpectraError) as unchecked:
+        extraction._settle_core_directions(
+            toy_model, {"R1"}, signs, 1e-4, np.random.default_rng(0))
+    assert "blocked in the model as given" in str(unchecked.value)
+    assert "another seed" in str(unchecked.value)
+
+    with pytest.raises(SpectraError) as checked:
+        extraction._settle_core_directions(
+            toy_model, {"R1"}, signs, 1e-4, np.random.default_rng(0),
+            core_is_known_live=True)
+    assert "blocked in the model as given" not in str(checked.value)
