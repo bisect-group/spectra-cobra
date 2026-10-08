@@ -10,3 +10,5 @@ dist/
 htmlcov/
 docs/_build/
 docs/generated/
+
+.DS_Store
