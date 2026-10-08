@@ -52,7 +52,7 @@ from typing import (
     Union,
 )
 
-from ._copy import copy_model
+from ._copy import subset_model
 from .exceptions import SpectraError
 
 if TYPE_CHECKING:
@@ -251,10 +251,9 @@ class CommunityModel:
                 f"Not organisms of this community: {sorted(unknown)[:5]}."
             )
         dropped = [org for org in self.organisms if org not in wanted]
-        model = copy_model(self.model)
-        model.remove_reactions(
-            [r for org in dropped for r in self.reactions_of[org]],
-            remove_orphans=True,
+        leaving = {r for org in dropped for r in self.reactions_of[org]}
+        model = subset_model(
+            self.model, {r.id for r in self.model.reactions} - leaving
         )
         survivors = tuple(org for org in self.organisms if org in wanted)
 
@@ -356,11 +355,7 @@ class CommunityModel:
         models: Dict[str, "Model"] = {}
         for organism in self.organisms:
             tagged = set(self.reactions_of[organism])
-            extracted = copy_model(self.model)
-            extracted.remove_reactions(
-                [r.id for r in extracted.reactions if r.id not in tagged],
-                remove_orphans=True,
-            )
+            extracted = subset_model(self.model, tagged)
             suffix = f"{ORGANISM_SEPARATOR}{organism}"
             # The pool is shared, so it cannot travel with any one unit.
             # Dropping it turns each transport into an exchange.
@@ -370,7 +365,12 @@ class CommunityModel:
                     if met.reactions:
                         extracted.add_boundary(met, type="exchange")
             else:
-                extracted.remove_metabolites(dangling, destructive=False)
+                # Reversed for the same reason as elsewhere: deleting
+                # from the front of optlang's container re-indexes
+                # everything after it.
+                extracted.remove_metabolites(
+                    list(reversed(dangling)), destructive=False
+                )
 
             own = Model(organism)
             own.solver = self.model.problem
@@ -1369,6 +1369,10 @@ def build_community_model(
                 )
             )
         community.add_cons_vars(constraints)
+        # Reversed so the context rollback deletes the tail of optlang's variable
+        # container first: removing from the front re-indexes everything after it,
+        # which is quadratic in the number of auxiliary variables.
+        constraints.reverse()
 
     logger.info(
         "community of %d units in %s mode: %d reactions, %d metabolites, "

@@ -27,7 +27,7 @@ from typing import (
 
 import numpy as np
 
-from ._copy import copy_model
+from ._copy import subset_model
 from ._lp import carrying_flux, forward, forward_cc, reverse
 from ._orientation import (
     STOICHIOMETRY,
@@ -473,29 +473,12 @@ def _extract(model: "Model", keep_ids: Set[str], remove_genes: bool) -> "Model":
     cobra.Model
         The extracted model.
 
-    Notes
-    -----
-    Orphaned metabolites are always dropped, orphaned genes only when asked.
-    cobrapy's ``remove_orphans`` covers both at once, so it is left off here
-    and the two are handled separately; otherwise ``remove_genes=False``
-    would remove the genes regardless.
+    See Also
+    --------
+    spectra_cobra._copy.subset_model : where the work happens.
 
     """
-    extracted = copy_model(model)
-    extracted.remove_reactions(
-        [rxn.id for rxn in model.reactions if rxn.id not in keep_ids],
-        remove_orphans=False,
-    )
-    orphaned_metabolites = [met for met in extracted.metabolites if not met.reactions]
-    if orphaned_metabolites:
-        extracted.remove_metabolites(orphaned_metabolites)
-    if remove_genes:
-        from cobra.manipulation import remove_genes as _remove_genes
-
-        unused = [gene.id for gene in extracted.genes if not gene.reactions]
-        if unused:
-            _remove_genes(extracted, unused, remove_reactions=False)
-    return extracted
+    return subset_model(model, keep_ids, remove_genes)
 
 
 def spectra_me(
@@ -910,9 +893,10 @@ def spectra_ccme(
 
     # Further solutions come from spectra_me on the consistent sub-model,
     # excluding the solution just found.
-    consistent = copy_model(model)
-    consistent.remove_reactions(sorted(blocked_ids), remove_orphans=True)
-    consistent_ids = {rxn.id for rxn in consistent.reactions}
+    consistent_ids = {
+        rxn.id for rxn in model.reactions if rxn.id not in blocked_ids
+    }
+    consistent = subset_model(model, consistent_ids)
     rest, _ = _spectra_me(
         consistent,
         sorted(live_core),

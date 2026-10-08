@@ -88,7 +88,7 @@ from typing import (
 from optlang.interface import OPTIMAL
 from optlang.symbolics import Zero
 
-from ._copy import copy_model
+from ._copy import subset_model
 from .exceptions import SpectraError, SpectraInfeasibleCoreError
 from .formulations import INCLUSION_CUTOFF_FACTOR
 
@@ -406,7 +406,14 @@ def minimal_reactome(
     if n_solutions < 1:
         raise SpectraError(f"n_solutions must be at least 1, not {n_solutions}.")
 
-    base = copy_model(model)
+    # A full copy, built rather than cloned: ``subset_model`` keeping
+    # everything is faster than ``copy_model`` and gives the same model.
+    base = subset_model(
+        model,
+        {rxn.id for rxn in model.reactions},
+        remove_genes=False,
+        keep_orphan_metabolites=True,
+    )
     original_ids = {rxn.id for rxn in base.reactions}
     tasks = list(tasks or ())
     if inclusion_cutoff is None:
@@ -483,7 +490,11 @@ def minimal_reactome(
         else (set(), set())
     )
     if blocked:
-        base.remove_reactions(sorted(blocked), remove_orphans=False)
+        base = subset_model(
+            base,
+            {rxn.id for rxn in base.reactions} - blocked,
+            keep_orphan_metabolites=True,
+        )
     protected = (requested | essential) - blocked
 
     counted = [rxn.id for rxn in base.reactions if rxn.id not in protected]
@@ -1674,14 +1685,11 @@ def _report(
         The result.
 
     """
-    model = copy_model(base)
     # Metabolites left without a reaction are kept. They cost nothing, and
     # dropping them would make a task that names one impossible to even set
     # up against the result -- reported as a failure of a network that in
     # fact performs the task, since the task brings its own exchanges.
-    model.remove_reactions(
-        sorted({rxn.id for rxn in base.reactions} - kept), remove_orphans=False
-    )
+    model = subset_model(base, set(kept), keep_orphan_metabolites=True)
     removed = tuple(sorted(original_ids - kept))
 
     growth: Dict[str, float] = {}

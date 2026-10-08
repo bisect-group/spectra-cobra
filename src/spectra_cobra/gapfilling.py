@@ -34,7 +34,7 @@ from typing import (
     Union,
 )
 
-from ._copy import copy_model
+from ._copy import subset_model
 from .exceptions import SpectraError, SpectraSolverError
 from .extraction import MIN_NET_LP, MIN_NET_MILP, spectra_me
 
@@ -237,11 +237,9 @@ def _rebuild(universal: "Model", keep: Set[str]) -> "Model":
         The reduced model.
 
     """
-    model = copy_model(universal)
-    model.remove_reactions(
-        sorted({r.id for r in universal.reactions} - keep), remove_orphans=False
-    )
-    return model
+    # Orphaned metabolites stay: the draft may still need them, and they
+    # cost nothing.
+    return subset_model(universal, set(keep), keep_orphan_metabolites=True)
 
 
 def gapfill_for_growth(

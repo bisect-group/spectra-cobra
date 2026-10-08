@@ -340,3 +340,225 @@ def test_lp_weights_follow_the_reaction_not_the_iteration_order(
     backwards = coefficients(["R4", "R3", "R2"])
     assert forwards, "the LP should have built auxiliary variables"
     assert forwards == backwards
+
+
+# --------------------------------------------------------------------------
+# What the extracted model carries over.
+#
+# ``_extract`` builds the result from the kept reactions instead of copying
+# the whole model and deleting the rest, because deleting is quadratic in the
+# number of removals. Everything the old path preserved by virtue of copying
+# now has to be carried deliberately, so each of those things is pinned here.
+# --------------------------------------------------------------------------
+
+ALL_PROBLEM_TYPES = (MIN_NET_LP, MIN_NET_MILP, GROWTH_OPTIM, TRADE_OFF)
+
+
+def _decorate(model: Model) -> Model:
+    """Hang metadata on a model so extraction has something to lose."""
+    from cobra.core.group import Group
+
+    model.name = "decorated toy"
+    for rxn in model.reactions:
+        rxn.annotation = {"sbo": "SBO:0000176", "rxn": rxn.id}
+        rxn.notes = {"origin": rxn.id}
+        rxn.subsystem = "toy subsystem"
+    for met in model.metabolites:
+        met.annotation = {"chebi": f"CHEBI:{len(met.id)}", "met": met.id}
+        met.notes = {"origin": met.id}
+    # The toy model carries no genes of its own, so give each reaction a rule
+    # before annotating what that creates.
+    for index, rxn in enumerate(model.reactions):
+        rxn.gene_reaction_rule = f"g{index}"
+    for gene in model.genes:
+        gene.name = f"{gene.id} product"
+        gene.annotation = {"ncbigene": f"gene:{gene.id}", "sbo": "SBO:0000243"}
+    model.add_groups(
+        [Group("g_all", name="everything", members=list(model.reactions)),
+         Group("g_r3", name="just R3", members=[model.reactions.R3]),
+         # Every member of this one is dropped when R3 is the core, so the
+         # group ends up empty -- which is what deleting the reactions out
+         # from under it used to leave behind.
+         Group("g_gone", name="dropped branch",
+               members=[model.reactions.R7, model.reactions.R8])]
+    )
+    return model
+
+
+@pytest.mark.parametrize("problem_type", ALL_PROBLEM_TYPES)
+def test_extraction_keeps_annotations_and_notes(
+    toy_model: Model, problem_type: str
+) -> None:
+    """Reaction and metabolite metadata survives every formulation."""
+    _decorate(toy_model)
+    extracted = spectra_me(
+        toy_model, ["R3"], problem_type=problem_type, seed=0
+    )
+    for rxn in extracted.reactions:
+        original = toy_model.reactions.get_by_id(rxn.id)
+        assert rxn.annotation == original.annotation, rxn.id
+        assert rxn.notes == original.notes, rxn.id
+        assert rxn.subsystem == original.subsystem, rxn.id
+    for met in extracted.metabolites:
+        original = toy_model.metabolites.get_by_id(met.id)
+        assert met.annotation == original.annotation, met.id
+        assert met.notes == original.notes, met.id
+
+
+def test_extraction_keeps_groups(toy_model: Model) -> None:
+    """Groups come across, with membership cut down to what survived.
+
+    A group whose members were all dropped stays behind as an empty group,
+    which is what deleting the reactions out from under it used to do.
+    """
+    _decorate(toy_model)
+    extracted = spectra_me(toy_model, ["R3"], seed=0)
+    assert {g.id for g in extracted.groups} == {
+        "g_all", "g_r3", "g_gone"}
+    assert not extracted.groups.get_by_id("g_gone").members, (
+        "a group whose members all went should survive, empty")
+    kept = _ids(extracted)
+    for group in extracted.groups:
+        original = toy_model.groups.get_by_id(group.id)
+        expected = {m.id for m in original.members} & kept
+        assert {m.id for m in group.members} == expected
+
+
+def test_extraction_keeps_the_objective(toy_model: Model) -> None:
+    """Objective coefficients and direction follow the model."""
+    toy_model.objective = {toy_model.reactions.R3: 2.0}
+    toy_model.objective.direction = "min"
+    extracted = spectra_me(toy_model, ["R3"], seed=0)
+    assert extracted.objective.direction == "min"
+    assert {
+        r.id: r.objective_coefficient
+        for r in extracted.reactions
+        if r.objective_coefficient
+    } == {"R3": 2.0}
+
+
+def test_objective_direction_survives_losing_every_objective_reaction(
+    toy_model: Model,
+) -> None:
+    """Direction is not collateral damage when the objective empties out.
+
+    Setting it only when some coefficient survived silently reverted a
+    minimisation to a maximisation.
+    """
+    toy_model.objective = {toy_model.reactions.R7: 1.0}
+    toy_model.objective.direction = "min"
+    extracted = spectra_me(toy_model, ["R3"], seed=0)
+    assert "R7" not in _ids(extracted)
+    assert extracted.objective.direction == "min"
+
+
+def test_extraction_keeps_the_tolerance(toy_model: Model) -> None:
+    """``model.tolerance`` is not reset to the cobrapy default."""
+    toy_model.tolerance = 1e-9
+    extracted = spectra_me(toy_model, ["R3"], seed=0)
+    assert extracted.tolerance == 1e-9
+
+
+def test_extraction_keeps_source_ordering(toy_model: Model) -> None:
+    """Elements keep the order they had, not the order they were built in.
+
+    Content-wise comparisons are blind to this: they key on identifiers. Only
+    sequence catches it, and index-based access depends on it.
+    """
+    # R11 drags in R9 and R10, whose identifiers sort before R5's -- so
+    # alphabetical order differs from the model's and the assertion can
+    # actually fail. A core of R3 keeps R1..R5, where the two coincide.
+    extracted = spectra_me(toy_model, ["R11"], problem_type=MIN_NET_LP, seed=0)
+    kept = _ids(extracted)
+    assert sorted(kept) != [r.id for r in toy_model.reactions if r.id in kept], (
+        "this core must keep reactions whose sorted order differs from the "
+        "model's, or the test cannot detect re-ordering"
+    )
+    assert [r.id for r in extracted.reactions] == [
+        r.id for r in toy_model.reactions if r.id in kept
+    ]
+    met_ids = {m.id for m in extracted.metabolites}
+    assert [m.id for m in extracted.metabolites] == [
+        m.id for m in toy_model.metabolites if m.id in met_ids
+    ]
+
+
+def test_extracting_everything_reproduces_the_model(toy_model: Model) -> None:
+    """Keeping every reaction gives back an identical model, not merely an
+    equivalent one -- same contents in the same order."""
+    from cobra.io.dict import model_to_dict
+
+    _decorate(toy_model)
+    everything = [r.id for r in toy_model.reactions]
+    extracted = spectra_me(
+        toy_model, everything, problem_type=MIN_NET_LP, remove_genes=False,
+        seed=0,
+    )
+    assert model_to_dict(extracted) == model_to_dict(toy_model)
+
+
+def test_the_source_model_is_unharmed(toy_model: Model) -> None:
+    """Extraction detaches objects from the source to copy them; it has to
+    put them back."""
+    before = ([r.id for r in toy_model.reactions],
+              [m.id for m in toy_model.metabolites])
+    spectra_me(toy_model, ["R3"], seed=0)
+    assert ([r.id for r in toy_model.reactions],
+            [m.id for m in toy_model.metabolites]) == before
+    assert all(r.model is toy_model for r in toy_model.reactions)
+    assert all(m.model is toy_model for m in toy_model.metabolites)
+    assert all(g.model is toy_model for g in toy_model.genes)
+
+
+def test_ccme_several_solutions_carry_metadata(toy_model: Model) -> None:
+    """``spectra_ccme`` extracts its first solution directly and the rest
+    through ``spectra_me``; both paths have to preserve metadata.
+
+    The toy model is used rather than the blocked one because a second
+    solution has to exist: its three parallel routes to D give the exclusion
+    something to find.
+    """
+    _decorate(toy_model)
+    models, _dropped = spectra_ccme(
+        toy_model, ["R5"], n_solutions=2,
+        alt_solution_method=PATHWAY_EXCLUSION, problem_type=MIN_NET_MILP,
+        seed=0,
+    )
+    assert isinstance(models, list) and len(models) == 2
+    for extracted in models:
+        assert extracted.name == "decorated toy"
+        for rxn in extracted.reactions:
+            assert rxn.annotation == (
+                toy_model.reactions.get_by_id(rxn.id).annotation
+            )
+
+
+def test_extraction_keeps_gene_annotations(toy_model: Model) -> None:
+    """Gene metadata survives, not merely the gene identifiers.
+
+    ``Reaction.__getstate__`` serialises the GPR to a string, so the rule is
+    re-parsed when the reactions are added and the genes arrive as fresh
+    objects holding nothing but an identifier. Without putting their metadata
+    back, a model whose genes are annotated loses every annotation: iJO1366
+    has 1366 of them. Recon3D and Harvey have none, which is why comparing
+    extractions of those models said nothing about it.
+    """
+    _decorate(toy_model)
+    extracted = spectra_me(toy_model, ["R3"], seed=0)
+    assert extracted.genes, "the toy model should carry genes"
+    for gene in extracted.genes:
+        original = toy_model.genes.get_by_id(gene.id)
+        assert gene.annotation == original.annotation, gene.id
+        assert gene.name == original.name, gene.id
+
+
+def test_extraction_keeps_gene_annotations_when_genes_are_kept(
+    toy_model: Model,
+) -> None:
+    """The same, for the genes put back by ``remove_genes=False``."""
+    _decorate(toy_model)
+    extracted = spectra_me(toy_model, ["R3"], remove_genes=False, seed=0)
+    assert {g.id for g in extracted.genes} == {g.id for g in toy_model.genes}
+    for gene in extracted.genes:
+        original = toy_model.genes.get_by_id(gene.id)
+        assert gene.annotation == original.annotation, gene.id
