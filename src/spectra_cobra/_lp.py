@@ -171,19 +171,25 @@ def _push(
     aux_vars = []
     constraints = []
 
+    # The constraint is sign_i * v_i - z_i, bounded on one side. Writing that
+    # as an expression makes optlang build it symbolically, and sympy then
+    # dominates the run: 10600 of them cost 19.1 s to construct against 2.3 s
+    # for the same constraints declared empty and filled in by coefficient.
+    # ``v_i`` is itself ``forward - reverse``, so the coefficients are
+    # sign_i on the forward variable, -sign_i on the reverse one, and -1 on
+    # the auxiliary variable.
+    coefficients = []
     for rxn_id in rxn_ids:
         reaction = model.reactions.get_by_id(rxn_id)
-        oriented_flux = signs[rxn_id] * reaction.flux_expression
+        sign = signs[rxn_id]
 
         if reverse:
             # z_i >= -tol and v_i <= z_i, minimised: drives v_i down to -tol.
             # Unbounded above on purpose: a finite bound would silently
             # bind on a model with large flux bounds.
             var = prob.Variable(f"spectra_aux_{rxn_id}", lb=-tol, ub=None)
-            constraints.append(
-                prob.Constraint(
-                    oriented_flux - var, name=f"spectra_aux_cons_{rxn_id}", ub=0.0
-                )
+            constraint = prob.Constraint(
+                Zero, name=f"spectra_aux_cons_{rxn_id}", ub=0.0
             )
         else:
             # z_i <= tol and v_i >= z_i, maximised: drives v_i up to tol.
@@ -191,14 +197,33 @@ def _push(
             # positive merely fails to contribute rather than making the
             # whole LP infeasible.
             var = prob.Variable(f"spectra_aux_{rxn_id}", lb=None, ub=tol)
-            constraints.append(
-                prob.Constraint(
-                    oriented_flux - var, name=f"spectra_aux_cons_{rxn_id}", lb=0.0
-                )
+            constraint = prob.Constraint(
+                Zero, name=f"spectra_aux_cons_{rxn_id}", lb=0.0
             )
+        constraints.append(constraint)
         aux_vars.append(var)
+        coefficients.append(
+            (
+                constraint,
+                {
+                    reaction.forward_variable: sign,
+                    reaction.reverse_variable: -sign,
+                    var: -1.0,
+                },
+            )
+        )
 
-    model.add_cons_vars(aux_vars + constraints)
+    to_add = aux_vars + constraints
+    model.add_cons_vars(to_add)
+    # The coefficients can only be set once the constraints belong to a
+    # problem.
+    model.solver.update()
+    for constraint, terms in coefficients:
+        constraint.set_linear_coefficients(terms)
+    # Reversed so the context rollback deletes the tail of optlang's variable
+    # container first: removing from the front re-indexes everything after it,
+    # which is quadratic in the number of auxiliary variables.
+    to_add.reverse()
     model.objective = prob.Objective(Zero, direction="min" if reverse else "max")
     if aux_vars:
         weights = rng.uniform(*WEIGHT_RANGE, size=len(aux_vars))

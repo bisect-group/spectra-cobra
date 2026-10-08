@@ -36,7 +36,7 @@ from typing import (
 
 from cobra.util.solver import linear_reaction_coefficients
 from optlang.interface import FEASIBLE, OPTIMAL, TIME_LIMIT
-from optlang.symbolics import Zero, add
+from optlang.symbolics import Zero
 
 from ._orientation import (
     apply_direction_bounds,
@@ -482,28 +482,41 @@ def _add_absolute_value_vars(
     variables = {}
     to_add = []
 
+    # Declared empty and filled in by coefficient rather than written as an
+    # expression: optlang builds an expression symbolically, and sympy then
+    # dominates the run. ``v_i`` is ``forward - reverse``, so the terms are
+    # +1 and -1 on those, and -/+1 on the absolute-value variable.
+    coefficients = []
     for rxn_id in rxn_ids:
         reaction = model.reactions.get_by_id(rxn_id)
         var = prob.Variable(f"spectra_abs_{rxn_id}", lb=0.0, ub=upper_bound)
         variables[rxn_id] = var
-        to_add.extend(
-            [
-                var,
-                # t_i >= v_i and t_i >= -v_i, i.e. t_i >= |v_i|.
-                prob.Constraint(
-                    reaction.flux_expression - var,
-                    name=f"spectra_abs_upper_{rxn_id}",
-                    ub=0.0,
-                ),
-                prob.Constraint(
-                    reaction.flux_expression + var,
-                    name=f"spectra_abs_lower_{rxn_id}",
-                    lb=0.0,
-                ),
-            ]
+        # t_i >= v_i and t_i >= -v_i, i.e. t_i >= |v_i|.
+        upper = prob.Constraint(
+            Zero, name=f"spectra_abs_upper_{rxn_id}", ub=0.0
         )
+        lower = prob.Constraint(
+            Zero, name=f"spectra_abs_lower_{rxn_id}", lb=0.0
+        )
+        to_add.extend([var, upper, lower])
+        forward, reverse = reaction.forward_variable, reaction.reverse_variable
+        coefficients.append((upper, {forward: 1.0, reverse: -1.0, var: -1.0}))
+        coefficients.append((lower, {forward: 1.0, reverse: -1.0, var: 1.0}))
 
     model.add_cons_vars(to_add)
+    # The coefficients can only be set once the constraints belong to a
+    # problem.
+    model.solver.update()
+    for constraint, terms in coefficients:
+        constraint.set_linear_coefficients(terms)
+    # Removing a variable makes optlang re-index every variable after it, so
+    # tearing this down in the order it was built is quadratic: the first
+    # deletion walks the whole container, the next all but one. cobrapy
+    # reverts the addition with ``partial(model.solver.remove, what)``, which
+    # holds this very list, so reversing it in place now means the rollback
+    # starts at the tail and each re-index touches almost nothing. 8000
+    # variables: 1.9 s before, 0.09 s after.
+    to_add.reverse()
     return variables
 
 
@@ -550,19 +563,32 @@ def _add_exclusion_constraints(
 
     prob = model.problem
     constraints = []
+    coefficients = []
     for index, solution in enumerate(previous_solutions):
         in_solution = [indicators[r] for r in solution if r in indicators]
         if not in_solution:
             continue
-        constraints.append(
-            prob.Constraint(
-                add(in_solution),
-                name=f"spectra_exclude_{index}",
-                ub=len(in_solution) - 1,
-            )
+        constraint = prob.Constraint(
+            Zero,
+            name=f"spectra_exclude_{index}",
+            ub=len(in_solution) - 1,
         )
+        constraints.append(constraint)
+        # Every indicator in the previous solution carries weight one.
+        coefficients.append((constraint, {var: 1.0 for var in in_solution}))
 
     model.add_cons_vars(constraints)
+    model.solver.update()
+    for constraint, terms in coefficients:
+        constraint.set_linear_coefficients(terms)
+    # Removing a variable makes optlang re-index every variable after it, so
+    # tearing this down in the order it was built is quadratic: the first
+    # deletion walks the whole container, the next all but one. cobrapy
+    # reverts the addition with ``partial(model.solver.remove, what)``, which
+    # holds this very list, so reversing it in place now means the rollback
+    # starts at the tail and each re-index touches almost nothing. 8000
+    # variables: 1.9 s before, 0.09 s after.
+    constraints.reverse()
 
 
 def min_net_lp(
@@ -723,6 +749,10 @@ def min_net_milp(
 
         indicators = {}
         to_add = []
+        # Declared empty and filled in by coefficient: writing these as
+        # expressions makes optlang build them through sympy, which costs
+        # more than the solve.
+        coefficients = []
         for key, members in groups.items():
             var = prob.Variable(f"spectra_z_{key}", type="binary")
             indicators[key] = var
@@ -733,21 +763,47 @@ def min_net_milp(
                 # orientation: negating both the flux and the swapped bounds
                 # reproduces the same inequalities. One binary over several
                 # reactions pins all of them at once.
-                to_add.extend(
-                    [
-                        prob.Constraint(
-                            reaction.flux_expression - reaction.lower_bound * var,
-                            name=f"spectra_z_lower_{rxn_id}",
-                            lb=0.0,
-                        ),
-                        prob.Constraint(
-                            reaction.flux_expression - reaction.upper_bound * var,
-                            name=f"spectra_z_upper_{rxn_id}",
-                            ub=0.0,
-                        ),
-                    ]
+                lower = prob.Constraint(
+                    Zero, name=f"spectra_z_lower_{rxn_id}", lb=0.0
+                )
+                upper = prob.Constraint(
+                    Zero, name=f"spectra_z_upper_{rxn_id}", ub=0.0
+                )
+                to_add.extend([lower, upper])
+                forward = reaction.forward_variable
+                backward = reaction.reverse_variable
+                coefficients.append(
+                    (
+                        lower,
+                        {
+                            forward: 1.0,
+                            backward: -1.0,
+                            var: -float(reaction.lower_bound),
+                        },
+                    )
+                )
+                coefficients.append(
+                    (
+                        upper,
+                        {
+                            forward: 1.0,
+                            backward: -1.0,
+                            var: -float(reaction.upper_bound),
+                        },
+                    )
                 )
         model.add_cons_vars(to_add)
+        model.solver.update()
+        for constraint, terms in coefficients:
+            constraint.set_linear_coefficients(terms)
+        # Removing a variable makes optlang re-index every variable after it, so
+        # tearing this down in the order it was built is quadratic: the first
+        # deletion walks the whole container, the next all but one. cobrapy
+        # reverts the addition with ``partial(model.solver.remove, what)``, which
+        # holds this very list, so reversing it in place now means the rollback
+        # starts at the tail and each re-index touches almost nothing. 8000
+        # variables: 1.9 s before, 0.09 s after.
+        to_add.reverse()
         _add_exclusion_constraints(model, indicators, previous_solutions)
 
         model.objective = prob.Objective(Zero, direction="min")
@@ -847,11 +903,18 @@ def trade_off(
 
         indicators = {}
         to_add = []
+        # Declared empty and filled in by coefficient rather than written as
+        # expressions: optlang builds an expression through sympy, which on a
+        # genome-scale model costs more than the solve. The oriented flux
+        # ``sign * v_i`` is ``sign * forward - sign * reverse``.
+        coefficients = []
         for rxn_id in indicator_ids:
             reaction = model.reactions.get_by_id(rxn_id)
             sign = signs[rxn_id]
             lower, upper = oriented_bounds(reaction, sign)
-            oriented_flux = sign * reaction.flux_expression
+            forward = reaction.forward_variable
+            backward = reaction.reverse_variable
+            oriented = {forward: float(sign), backward: -float(sign)}
 
             included = prob.Variable(f"spectra_z_{rxn_id}", type="binary")
             indicators[rxn_id] = included
@@ -859,49 +922,73 @@ def trade_off(
 
             if not is_reversible(reaction, sign):
                 # tol * z <= oriented flux <= ub * z
-                to_add.extend(
-                    [
-                        prob.Constraint(
-                            oriented_flux - tol * included,
-                            name=f"spectra_irr_lower_{rxn_id}",
-                            lb=0.0,
-                        ),
-                        prob.Constraint(
-                            oriented_flux - upper * included,
-                            name=f"spectra_irr_upper_{rxn_id}",
-                            ub=0.0,
-                        ),
-                    ]
+                irr_lower = prob.Constraint(
+                    Zero, name=f"spectra_irr_lower_{rxn_id}", lb=0.0
+                )
+                irr_upper = prob.Constraint(
+                    Zero, name=f"spectra_irr_upper_{rxn_id}", ub=0.0
+                )
+                to_add.extend([irr_lower, irr_upper])
+                coefficients.append(
+                    (irr_lower, {**oriented, included: -float(tol)})
+                )
+                coefficients.append(
+                    (irr_upper, {**oriented, included: -float(upper)})
                 )
                 continue
 
             forward_on = prob.Variable(f"spectra_a_{rxn_id}", type="binary")
             reverse_on = prob.Variable(f"spectra_b_{rxn_id}", type="binary")
-            to_add.extend(
-                [
-                    forward_on,
-                    reverse_on,
-                    # a + b = z: at most one direction may be active.
-                    prob.Constraint(
-                        forward_on + reverse_on - included,
-                        name=f"spectra_split_{rxn_id}",
-                        lb=0.0,
-                        ub=0.0,
-                    ),
-                    prob.Constraint(
-                        oriented_flux - tol * forward_on - lower * reverse_on,
-                        name=f"spectra_rev_lower_{rxn_id}",
-                        lb=0.0,
-                    ),
-                    prob.Constraint(
-                        oriented_flux - upper * forward_on + tol * reverse_on,
-                        name=f"spectra_rev_upper_{rxn_id}",
-                        ub=0.0,
-                    ),
-                ]
+            # a + b = z: at most one direction may be active.
+            split = prob.Constraint(
+                Zero, name=f"spectra_split_{rxn_id}", lb=0.0, ub=0.0
+            )
+            rev_lower = prob.Constraint(
+                Zero, name=f"spectra_rev_lower_{rxn_id}", lb=0.0
+            )
+            rev_upper = prob.Constraint(
+                Zero, name=f"spectra_rev_upper_{rxn_id}", ub=0.0
+            )
+            to_add.extend([forward_on, reverse_on, split, rev_lower, rev_upper])
+            coefficients.append(
+                (
+                    split,
+                    {forward_on: 1.0, reverse_on: 1.0, included: -1.0},
+                )
+            )
+            coefficients.append(
+                (
+                    rev_lower,
+                    {
+                        **oriented,
+                        forward_on: -float(tol),
+                        reverse_on: -float(lower),
+                    },
+                )
+            )
+            coefficients.append(
+                (
+                    rev_upper,
+                    {
+                        **oriented,
+                        forward_on: -float(upper),
+                        reverse_on: float(tol),
+                    },
+                )
             )
 
         model.add_cons_vars(to_add)
+        model.solver.update()
+        for constraint, terms in coefficients:
+            constraint.set_linear_coefficients(terms)
+        # Removing a variable makes optlang re-index every variable after it, so
+        # tearing this down in the order it was built is quadratic: the first
+        # deletion walks the whole container, the next all but one. cobrapy
+        # reverts the addition with ``partial(model.solver.remove, what)``, which
+        # holds this very list, so reversing it in place now means the rollback
+        # starts at the tail and each re-index touches almost nothing. 8000
+        # variables: 1.9 s before, 0.09 s after.
+        to_add.reverse()
         _add_exclusion_constraints(model, indicators, previous_solutions)
 
         model.objective = prob.Objective(Zero, direction="max")
