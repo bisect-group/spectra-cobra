@@ -44,7 +44,7 @@ gurobi = ["gurobipy"]
 cplex = ["cplex"]
 
 [project.urls]
-Homepage = "https://github.com/NiravBhattLab/SPECTRA"
+Homepage = "https://github.com/bisect-group/SPECTRA"
 
 [tool.setuptools.packages.find]
 where = ["src"]

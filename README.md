@@ -11,7 +11,7 @@ multi-tissue models. What changes between them is the universal model, the
 evidence supplied and the objective chosen, not the routine called.
 
 SPECTRA is also available as a
-[MATLAB package](https://github.com/NiravBhattLab/SPECTRA) for the COBRA
+[MATLAB package](https://github.com/bisect-group/SPECTRA) for the COBRA
 Toolbox.
 
 Documentation: <https://spectra-cobra.readthedocs.io>
