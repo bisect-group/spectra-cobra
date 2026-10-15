@@ -71,30 +71,11 @@ Four rounds of two LPs each. The count is a useful sanity check on a large
 model: it grows very slowly with model size, so a run that takes many rounds
 is worth a second look.
 
-Agreement with cobrapy
-----------------------
-
-With the detection cutoff set to the solver tolerance, this agrees exactly
-with cobrapy's own ``fastcc``:
-
-.. code-block:: python
-
-   from cobra.flux_analysis import fastcc
-
-   spectra_ids, _ = consistent_reaction_ids(model, tol=1e-3,
-                                            detection_cutoff=1e-7)
-   fastcc_model = fastcc(model, 1e-3, 1e-7)
-
-   print(spectra_ids == {r.id for r in fastcc_model.reactions})
-
-.. code-block:: text
-
-   True
-
-The default ``detection_cutoff`` is ``0.99 * tol``, the stricter criterion:
-it also discards reactions that can carry *some* flux but never as much as
-``tol``. Which you want depends on whether ``tol``
-is a meaningful flux magnitude for your problem or just a numerical floor.
+The default ``detection_cutoff`` is ``0.99 * tol``, the stricter of the two
+criteria available: it also discards reactions that can carry *some* flux but
+never as much as ``tol``. Setting it to the solver tolerance instead counts
+any nonzero flux. Which you want depends on whether ``tol`` is a meaningful
+flux magnitude for your problem or just a numerical floor.
 
 Choosing ``tol``
 ----------------

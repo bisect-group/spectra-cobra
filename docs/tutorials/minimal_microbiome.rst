@@ -24,12 +24,31 @@ reading presence from the model would count an absent organism as present.
 Building a community
 --------------------
 
+The nine AGORA reconstructions used here are distributed with SPECTRA, in
+the ``MinimalMicrobiome/models/`` directory of the `SPECTRA repository
+<https://github.com/bisect-group/SPECTRA>`_:
+
 .. code-block:: python
 
    from cobra.io import load_matlab_model
    from spectra_cobra import build_community_model
 
-   models = [load_matlab_model(f"agora/{name}.mat") for name in strains]
+   strains = [
+       "Bacteroides_thetaiotaomicron_VPI_5482",
+       "Bifidobacterium_adolescentis_ATCC_15703",
+       "Enterococcus_faecalis_V583",
+       "Escherichia_coli_SE11",
+       "Eubacterium_rectale_ATCC_33656",
+       "Faecalibacterium_prausnitzii_A2_165",
+       "Klebsiella_pneumoniae_pneumoniae_MGH78578",
+       "Lactobacillus_casei_ATCC_334",
+       "Streptococcus_thermophilus_LMG_18311",
+   ]
+   tags = ["Bthe", "Badl", "Efae", "Ecol", "Erec",
+           "Fpra", "Kpne", "Lcas", "Sthe"]
+
+   models = [load_matlab_model(f"MinimalMicrobiome/models/{name}.mat")
+             for name in strains]
    community = build_community_model(models, organisms=tags)
 
 Each organism keeps its own external compartment; a transport links it to a
@@ -50,7 +69,19 @@ cross-feeding becomes possible.
 Applying a diet
 ---------------
 
-A diet is a set of uptake bounds on the *shared* exchanges:
+A diet is a set of uptake bounds on the *shared* exchanges. The AGORA diets
+are tab-separated ``EX_<metabolite>(e)``/bound pairs, published at
+`VMH <https://www.vmh.life>`_ and alongside the original implementation at
+`RamanLab/minMicrobiome <https://github.com/RamanLab/minMicrobiome>`_:
+
+.. code-block:: python
+
+   diet = {}
+   with open("sample_diet.txt") as handle:
+       for line in handle:
+           rxn_id, bound = line.split()
+           metabolite = rxn_id[len("EX_"):].removesuffix("(e)")
+           diet[metabolite] = abs(float(bound))
 
 .. code-block:: python
 
@@ -165,6 +196,18 @@ species replaceable? — or to hold a strain you know must be present:
 
    result = minimal_microbiome(community, products=["EX_but_u"],
                                required=["Fp"])
+
+References
+----------
+
+* Raghu, A. K., Palanikumar, I., and Raman, K. (2024). Designing
+  function-specific minimal microbiomes from large microbial communities.
+  *npj Systems Biology and Applications*, 10, 46.
+  https://doi.org/10.1038/s41540-024-00373-1
+* Magnúsdóttir, S., Heinken, A., Kutt, L., et al. (2017). Generation of
+  genome-scale metabolic reconstructions for 773 members of the human gut
+  microbiota. *Nature Biotechnology*, 35(1), 81–89.
+  https://doi.org/10.1038/nbt.3703
 
 Next
 ----

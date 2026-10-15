@@ -233,6 +233,15 @@ empty model, since nothing in that network can carry flux at ``n=1``.
 
 Both of these results are asserted in the test suite.
 
+References
+----------
+
+* Prigent, S., Frioux, C., Dittami, S. M., Thiele, S., Larhlimi, A., Collet,
+  G., Gutknecht, F., Got, J., Eveillard, D., Bourdon, J., Plewniak, F.,
+  Tonon, T., and Siegel, A. (2017). Meneco, a topology-based gap-filling tool
+  applicable to degraded genome-wide metabolic networks. *PLoS Computational
+  Biology*, 13(1), e1005276. https://doi.org/10.1371/journal.pcbi.1005276
+
 Next
 ----
 

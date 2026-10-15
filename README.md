@@ -72,12 +72,12 @@ if blocked_core:
 `problem_type` picks what the extraction optimises. What a weight *means*
 depends on the choice, so the two columns go together:
 
-| `problem_type`  | Objective                                      | Weights      | Solves |
-|-----------------|------------------------------------------------|--------------|--------|
-| `"minNetLP"`    | minimise weighted total absolute flux          | non-negative | 1 LP   |
-| `"minNetMILP"`  | minimise weighted reaction count               | non-negative | 1 MILP |
-| `"tradeOff"`    | maximise net weight: positive in, negative out | **any real** | 1 MILP |
-| `"growthOptim"` | maximise biomass minus weighted flux           | non-negative | 1 LP   |
+| `problem_type`         | Objective                                      | Weights      | Solves |
+|------------------------|------------------------------------------------|--------------|--------|
+| `"minNetLP"` (default) | minimise weighted total absolute flux          | non-negative | 1 LP   |
+| `"minNetMILP"`         | minimise weighted reaction count               | non-negative | 1 MILP |
+| `"tradeOff"`           | maximise net weight: positive in, negative out | **any real** | 1 MILP |
+| `"growthOptim"`        | maximise biomass minus weighted flux           | non-negative | 1 LP   |
 
 None of this governs the core reactions. Those are constrained to carry at
 least `tol` whichever `problem_type` you pick, so they are kept by the

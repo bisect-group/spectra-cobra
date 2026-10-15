@@ -7,7 +7,6 @@ from cobra import Model, Reaction
 
 from spectra_cobra import (
     SpectraError,
-    flux_reducer,
     min_net_lp,
     min_net_milp,
     trade_off,
@@ -176,34 +175,6 @@ def test_negative_direction_forces_reverse_flux(reversible_model: Model) -> None
     directions["R2"] = -1
     kept = min_net_lp(reversible_model, directions, _ones(reversible_model), 1e-4)
     assert "R2" in kept
-
-
-def test_flux_reducer_returns_a_feasible_steady_state(toy_model: Model) -> None:
-    """The reduced flux satisfies the mass balance of every metabolite."""
-    fluxes = flux_reducer(toy_model)
-    assert set(fluxes) == {r.id for r in toy_model.reactions}
-
-    for metabolite in toy_model.metabolites:
-        balance = sum(
-            reaction.get_coefficient(metabolite.id) * fluxes[reaction.id]
-            for reaction in metabolite.reactions
-        )
-        assert abs(balance) < 1e-6
-
-
-def test_flux_reducer_is_sparse(toy_model: Model) -> None:
-    """Minimising total flux on a model with no demand gives no flux."""
-    fluxes = flux_reducer(toy_model)
-    assert all(abs(v) < 1e-6 for v in fluxes.values())
-
-
-def test_flux_reducer_respects_forced_uptake(toy_model: Model) -> None:
-    """With an uptake forced on, the reduced flux routes it to a sink."""
-    toy_model.reactions.R1.bounds = (1.0, 1.0)
-    fluxes = flux_reducer(toy_model)
-    assert abs(fluxes["R1"] - 1.0) < 1e-6
-    # The A-B-C-D route is the only way out of A.
-    assert abs(fluxes["R5"] - 1.0) < 1e-6
 
 
 def test_orientation_of_negative_only_reactions(backwards_model: Model) -> None:

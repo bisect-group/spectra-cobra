@@ -135,12 +135,15 @@ convention is not the same for all of them — see :doc:`formulations`.
 Dropping orphaned genes
 -----------------------
 
-Removing reactions can leave genes with nothing to act on. By default they are
-kept; ``remove_genes=True`` prunes them:
+Removing reactions can leave genes with nothing to act on. They are dropped
+by default; ``remove_genes=False`` keeps them:
 
 .. code-block:: python
 
-   extracted = spectra_me(consistent, ["PGI"], tol=1e-3, remove_genes=True)
+   extracted = spectra_me(consistent, ["PGI"], tol=1e-3, remove_genes=False)
+
+Keeping them is the slower of the two: the extracted model is built from the
+reactions kept, so the orphans have to be put back afterwards.
 
 Reproducibility
 ---------------
@@ -156,23 +159,10 @@ one:
    b = spectra_me(consistent, core, tol=1e-3, seed=0)
    assert {r.id for r in a.reactions} == {r.id for r in b.reactions}
 
-That second guarantee is worth stating because it is easy to lose. The
-coefficients are drawn as one block and attached to the auxiliary variables
-in order, and the core set arrives as a Python ``set``, whose iteration order
-depends on ``PYTHONHASHSEED`` and so differs between interpreter runs. The
-identifiers are therefore sorted before the LP is built, which keeps each
-reaction's coefficient tied to the reaction rather than to its position.
-Without that, a seeded run reproduces only inside a single process.
-
-On Recon3D this was measured both ways. Before the identifiers were sorted,
-two processes given the same seed, ``tol`` and solver tolerance extracted
-1773 and 1797 reactions from the same core set of 200. After, three
-processes started under ``PYTHONHASHSEED`` 0, 1 and 2 returned identical
-reaction sets at core sizes 50, 200 and 500, and four repeats within one
-process agreed as well.
-
-The solver is the remaining source of variation. Gurobi proved deterministic
-across all of those runs; a solver that is not would still vary.
+Core identifiers are sorted before the LP is built, so each reaction keeps
+its own coefficient whatever ``PYTHONHASHSEED`` does to the iteration order
+of the core set. Without that, a seeded run reproduces only inside a single
+process. The solver is the remaining source of variation.
 
 Next
 ----

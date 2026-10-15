@@ -4,12 +4,13 @@ SPECTRA for cobrapy
 **S**\ calable **P**\ latform for **E**\ xtracting **C**\ onstraint-based
 **T**\ op-down **R**\ econstructions and **A**\ nalysis.
 
-``spectra-cobra`` reconstructs metabolic networks from multi-omics data at a
-range of biological scales: minimal reactomes, context-specific models,
-gap-filled reconstructions, minimal microbiomes, microbial community models
-and multi-tissue models. What changes between them is the universal model,
-the evidence supplied and the objective chosen, not the routine called. It is
-built on `cobrapy <https://github.com/opencobra/cobrapy>`_.
+``spectra-cobra`` checks flux consistency and reconstructs metabolic
+networks from multi-omics data at a range of biological scales: minimal
+reactomes, context-specific models, gap-filled reconstructions, minimal
+microbiomes, microbial community models and multi-tissue models. What
+changes between them is the universal model, the evidence supplied and the
+objective chosen, not the routine called. It is built on
+`cobrapy <https://github.com/opencobra/cobrapy>`_.
 
 At a glance
 -----------
@@ -42,11 +43,10 @@ What is in the package
    * - :doc:`functions/spectra_me`
      - Extracts a context-specific model around a core set
    * - :doc:`functions/spectra_ccme`
-     - Both at once, for a model that may be inconsistent
+     - Both at once (``spectra_cc`` + ``spectra_me``), for a model that may
+       be inconsistent
    * - :doc:`functions/formulations`
      - The network inference objectives the extraction can use
-   * - :doc:`functions/flux_reducer`
-     - Finds a sparse flux distribution
    * - :doc:`functions/verification`
      - Checks an extracted model is consistent and complete
    * - :doc:`functions/tasks`
@@ -106,7 +106,6 @@ Citation
    functions/spectra_me
    functions/spectra_ccme
    functions/formulations
-   functions/flux_reducer
    functions/verification
    functions/tasks
    functions/gapfilling

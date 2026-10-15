@@ -11,7 +11,7 @@ aerobically" or "synthesise L-glutamate from glucose and ammonium" are
 statements the model either satisfies or does not, and a task list is the
 specification a gap-filled model is held to.
 
-The difficulty is that "the model must perform this task" is awkward to
+The difficulty is that "the model must perform this task" is difficult to
 express as a constraint on an extraction. The trick is to turn it into one
 that is not.
 
@@ -87,9 +87,50 @@ On the textbook model, with four tasks:
 .. code-block:: python
 
    from cobra.io import load_model
-   from spectra_cobra import check_tasks, essential_reactions_for_tasks, spectra_me
+   from spectra_cobra import (
+       MetabolicTask, TaskEquation, check_tasks,
+       essential_reactions_for_tasks, spectra_me,
+   )
 
    universal = load_model("textbook")
+
+   HYDROLYSIS = {"atp_c": -1.0, "h2o_c": -1.0,
+                 "adp_c": 1.0, "pi_c": 1.0, "h_c": 1.0}
+   AEROBIC = ["glc__D_e", "o2_e", "nh4_e", "pi_e", "h2o_e", "h_e"]
+   RESPIRED = {m: (0.0, 1000.0) for m in
+               ["co2_e", "h2o_e", "h_e", "ac_e", "etoh_e",
+                "for_e", "lac__D_e", "succ_e"]}
+   FERMENTED = {m: (0.0, 1000.0) for m in
+                ["co2_e", "h2o_e", "h_e", "ac_e", "etoh_e", "for_e"]}
+
+   tasks = [
+       MetabolicTask(
+           id="atp_aerobic",
+           inputs={m: (0.0, 10.0) for m in AEROBIC},
+           outputs=RESPIRED,
+           equations=[TaskEquation(HYDROLYSIS, (1.0, 1000.0))],
+       ),
+       MetabolicTask(
+           id="atp_anaerobic",
+           inputs={m: (0.0, 10.0) for m in AEROBIC if m != "o2_e"},
+           outputs=FERMENTED,
+           equations=[TaskEquation(HYDROLYSIS, (1.0, 1000.0))],
+       ),
+       MetabolicTask(
+           id="make_glutamate",
+           inputs={m: (0.0, 10.0) for m in AEROBIC},
+           outputs=RESPIRED,
+           equations=[TaskEquation({"glu__L_c": -1.0}, (1.0, 1000.0))],
+       ),
+       # A negative control: nothing may be taken up, so ATP cannot be made.
+       MetabolicTask(
+           id="no_free_atp",
+           inputs={},
+           outputs=RESPIRED,
+           equations=[TaskEquation(HYDROLYSIS, (1.0, 1000.0))],
+           should_fail=True,
+       ),
+   ]
 
    for result in check_tasks(universal, tasks):
        print(result.task.id, result.feasible, result.ok)
@@ -147,6 +188,13 @@ already has and charging for everything else:
    # draft, not to replace it.
    added = {rxn.id for rxn in filled.reactions} - draft_ids
 
+   # The gap-filled model is the draft plus those additions.
+   gapfilled = universal.copy()
+   gapfilled.remove_reactions(
+       sorted({rxn.id for rxn in universal.reactions} - draft_ids - added),
+       remove_orphans=False)
+   present = {rxn.id for rxn in gapfilled.reactions}
+
 .. code-block:: text
 
    added back: ['ACALD', 'CYTBD']
@@ -167,10 +215,53 @@ towards a particular reaction list.
 At genome scale
 ---------------
 
-The same workflow on iJO1366 (2583 reactions), with 23 tasks — energy
-metabolism, acetate utilisation, and one biosynthesis task per proteinogenic
-amino acid — and a draft made by deleting 150 random non-exchange reactions,
-4 of which were essential to some task:
+The same workflow on iJO1366 (2583 reactions), with 23 tasks — aerobic and
+anaerobic ATP production, growth on acetate, and one biosynthesis task per
+proteinogenic amino acid:
+
+.. code-block:: python
+
+   AMINO_ACIDS = ["ala__L", "arg__L", "asn__L", "asp__L", "cys__L", "gln__L",
+                  "glu__L", "gly", "his__L", "ile__L", "leu__L", "lys__L",
+                  "met__L", "phe__L", "pro__L", "ser__L", "thr__L", "trp__L",
+                  "tyr__L", "val__L"]
+   AEROBIC = ["glc__D_e", "o2_e", "nh4_e", "pi_e", "h2o_e", "h_e",
+              "so4_e", "k_e"]
+
+   universal = load_model("iJO1366")
+   tasks = [
+       MetabolicTask(id="atp_aerobic",
+                     inputs={m: (0.0, 10.0) for m in AEROBIC}, outputs=RESPIRED,
+                     equations=[TaskEquation(HYDROLYSIS, (1.0, 1000.0))]),
+       MetabolicTask(id="atp_anaerobic",
+                     inputs={m: (0.0, 10.0) for m in AEROBIC if m != "o2_e"},
+                     outputs=RESPIRED,
+                     equations=[TaskEquation(HYDROLYSIS, (1.0, 1000.0))]),
+       MetabolicTask(id="grow_on_acetate",
+                     inputs={**{m: (0.0, 10.0) for m in AEROBIC
+                                if m != "glc__D_e"}, "ac_e": (0.0, 10.0)},
+                     outputs=RESPIRED,
+                     equations=[TaskEquation(HYDROLYSIS, (1.0, 1000.0))]),
+   ] + [
+       MetabolicTask(id=f"make_{aa}",
+                     inputs={m: (0.0, 10.0) for m in AEROBIC}, outputs=RESPIRED,
+                     equations=[TaskEquation({f"{aa}_c": -1.0}, (0.1, 1000.0))])
+       for aa in AMINO_ACIDS
+   ]
+
+All 23 are feasible on iJO1366 itself, and they have 95 essential reactions
+between them. The draft deletes 150 random non-exchange reactions, two of
+which were essential to some task:
+
+.. code-block:: python
+
+   import random
+
+   internal = sorted(r.id for r in universal.reactions
+                     if r not in universal.boundary)
+   draft = universal.copy()
+   draft.remove_reactions(random.Random(0).sample(internal, 150),
+                          remove_orphans=False)
 
 .. list-table::
    :header-rows: 1
@@ -184,39 +275,39 @@ amino acid — and a draft made by deleting 150 random non-exchange reactions,
    * - draft
      - 2433
      - —
-     - 5
+     - 6
      - —
    * - ``tradeOff``
-     - 2476
-     - 43
+     - 2477
+     - 44
      - **0**
-     - 6.1 s
+     - 3.2 s
    * - ``minNetMILP``
-     - 2441
-     - 8
+     - 2448
+     - 15
      - 1
-     - 4.4 s
+     - 2.2 s
    * - ``minNetMILP`` + repair
-     - 2442
-     - 9
+     - 2449
+     - 16
      - **0**
      - +1 solve
 
-Checking the tasks took 0.5 s and finding the 93 essential reactions 5.3 s,
+Checking the tasks took 0.4 s and finding the 95 essential reactions 5.1 s,
 so the whole preparation is cheaper than a single genome-scale MILP.
 
 Which objective?
 ----------------
 
-The two rows above differ by a factor of five in what they add, and the
+The two rows above differ by a factor of three in what they add, and the
 difference is instructive rather than a matter of taste.
 
-``minNetMILP`` adds the minimum: 8 reactions, essentially just the deleted
+``minNetMILP`` adds the minimum: 15 reactions, essentially just the deleted
 essential ones. One task — using acetate as a carbon source — still fails,
 because it has alternative routes and therefore contributed nothing to the
 core set. This is the warning at the top of the page, happening.
 
-``tradeOff`` adds 43 and fixes everything, but not because it understood the
+``tradeOff`` adds 44 and fixes everything, but not because it understood the
 problem better. Signed weights make it *reward* including draft reactions, so
 it builds a larger active network, and the extra reactions happen to restore
 the acetate route. That is luck, and on another draft it would not be.
@@ -243,12 +334,14 @@ So prefer ``minNetMILP`` and then repair what is left:
        with task_constraints(universal, result.task) as constrained:
            weights = {rxn.id: (0.0 if rxn.id in present else 1.0)
                       for rxn in constrained.reactions}
-           kept = min_net_milp(constrained, {}, weights, 1e-4, True, 300.0, None)
+           solution = min_net_milp(constrained, {}, weights,
+                                   1e-4, True, 300.0, None)
+           added |= set(solution.included) - present
 
 On the run above that added **one** reaction and brought the failures to
-zero, for a final model of 2442 reactions against ``tradeOff``'s 2476. Minimise,
-then repair what the core could not express: 34 reactions smaller, and correct
-for a reason rather than by accident.
+zero, for a final model of 2449 reactions against ``tradeOff``'s 2477.
+Minimise, then repair what the core could not express: 28 reactions smaller,
+and correct for a reason rather than by accident.
 
 Validate the task list first
 ----------------------------

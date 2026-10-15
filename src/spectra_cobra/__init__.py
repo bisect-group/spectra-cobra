@@ -56,7 +56,6 @@ from .extraction import (
     spectra_ccme,
     spectra_me,
 )
-from .flux_reducer import flux_reducer
 from .formulations import (
     MilpSolution,
     growth_optim,
@@ -108,7 +107,6 @@ __all__ = (
     "trade_off",
     "growth_optim",
     "MilpSolution",
-    "flux_reducer",
     # Verification.
     "check_extraction",
     "ExtractionReport",

@@ -6,38 +6,46 @@ page runs the same workflow on Recon3D, the human reconstruction SPECTRA's own
 experiments use, and reports what actually happens — including where the
 default formulation falls short.
 
-The model used here is the consistent Recon3D distributed with SPECTRA:
-11303 reactions over 6388 metabolites.
+The model used here is the consistent Recon3D distributed with SPECTRA —
+11303 reactions over 6388 metabolites. It lives in the ``Recon3D+/``
+directory of the `SPECTRA repository
+<https://github.com/bisect-group/SPECTRA>`_, alongside ``UpdatedRecon3D.mat``
+and the additional GPR rules.
 
-Getting a fully consistent model
---------------------------------
+.. note::
+
+   Those are MATLAB structures that cobrapy's ``load_matlab_model`` refuses,
+   because Recon3D carries the gene ``AOC2`` twice. Convert them with the
+   COBRA Toolbox, or take Recon3D from
+   `BiGG <http://bigg.ucsd.edu/models/Recon3D>`_, before running anything
+   below against them.
+
+Watching the check do work
+--------------------------
+
+Both distributed files are *already* consistency-checked: they hold 11303
+reactions with nothing blocked, as does the ``Reconmodel.mat`` used in the
+PCOS study (10600 reactions, 0 blocked). Running the check on one of those
+tells you only that the file is what it claims.
+
+To see it remove anything you need a reconstruction that ships inconsistent.
+iJO1366 does, and it comes with cobrapy, so this runs anywhere:
 
 .. code-block:: python
 
+   from cobra.io import load_model
    from spectra_cobra import spectra_cc
 
+   model = load_model("iJO1366")
    model.solver = "gurobi"
    consistent = spectra_cc(model, tol=1e-4, detection_cutoff=1e-7, seed=0)
    print(f"{len(model.reactions)} -> {len(consistent.reactions)} reactions")
 
-On Recon3D restricted to a defined medium — which is where context-specific
-modelling actually starts, most exchanges closed — that gives:
-
 .. code-block:: text
 
-   11303 -> 8406 reactions
+   2583 -> 1705 reactions
 
-2897 reactions removed, in 8 LPs and about 30 seconds.
-
-.. note::
-
-   The files in the SPECTRA repository's ``Recon3D+/`` directory are *already*
-   consistency-checked: both ``UpdatedRecon3D.mat`` and
-   ``consRecon3DGeneSymbol.mat`` hold 11303 reactions with nothing blocked, as
-   does the ``Reconmodel.mat`` used in the PCOS study (10600 reactions, 0
-   blocked). Running the check on one of those tells you only that the file is
-   what it claims. Close the medium first, or start from an unchecked
-   reconstruction, if you want to see the check do work.
+878 reactions removed, in about 1.5 seconds.
 
 Proving it is consistent
 ------------------------
@@ -56,7 +64,7 @@ randomised tie-breaking:
 
 .. code-block:: text
 
-   8406/8406 consistent in 8 LPs
+   1705/1705 consistent in 12 LPs
 
 And confirm independently with cobrapy, which uses FVA rather than this
 algorithm:
@@ -67,91 +75,8 @@ algorithm:
 
    assert find_blocked_reactions(consistent, zero_cutoff=1e-7) == []
 
-Both hold. The same cycle on iJO1366, which ships genuinely inconsistent,
-removes 878 of 2583 reactions and the remaining 1705 are a fixed point with
-zero blocked by FVA.
-
-Accuracy against fastcc
------------------------
-
-On the defined-medium Recon3D the two methods disagree on six reactions.
-Taking FVA on the full model as the arbiter:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 30 20 25 25
-
-   * - Reaction
-     - FVA \|v\|max
-     - Truly
-     - Which was right
-   * - ``EX_M00234[e]``
-     - 0
-     - blocked
-     - ``spectra_cc``
-   * - ``EX_M01807[e]``
-     - 0
-     - blocked
-     - ``spectra_cc``
-   * - ``HMR_0002``
-     - 0
-     - blocked
-     - ``spectra_cc``
-   * - ``HMR_3996``
-     - 1000
-     - consistent
-     - ``spectra_cc``
-   * - ``r1391``
-     - 1000
-     - consistent
-     - ``spectra_cc``
-   * - ``r1392``
-     - 1000
-     - consistent
-     - ``spectra_cc``
-
-``spectra_cc`` is right on all six; ``fastcc`` produced three false positives
-and three false negatives. On the PCOS ``Reconmodel.mat`` the pattern repeats
-on a smaller scale: ``spectra_cc`` and FVA agree that all 10600 reactions are
-consistent, while ``fastcc`` reports 3 of them blocked.
-
-Reproducibility at genome scale
--------------------------------
-
-Part of that disagreement is that ``fastcc`` does not give the same answer
-twice. Its singleton phase picks an arbitrary element from a Python set, and
-set iteration order depends on ``PYTHONHASHSEED``, so the result shifts from
-run to run. ``spectra_cc`` given a ``seed`` does not:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 34 33 33
-
-   * - Run
-     - ``spectra_cc`` (``seed=0``)
-     - ``fastcc``
-   * - ``PYTHONHASHSEED=1``
-     - 8406
-     - 8408
-   * - ``PYTHONHASHSEED=2``
-     - 8406
-     - 8405
-   * - ``PYTHONHASHSEED=3``
-     - 8406
-     - 8403
-   * - two further runs
-     - 8406, 8406
-     - 8410, 8406
-
-Across five runs on the same model ``fastcc`` spans 8403 to 8410, a range of
-seven reactions, while ``spectra_cc`` returns 8406 every time.
-
-This is not a claim that ``spectra_cc`` is always more accurate — six
-reactions out of 11303 is a 0.05% disagreement, and both are far closer to
-each other than to being wrong. But it does mean the port is not merely
-reproducing ``fastcc``, that it is the reproducible of the two, and that at
-genome scale a consistency result is worth confirming with FVA whichever
-method produced it.
+Both hold: the 1705 kept reactions are a fixed point, and FVA finds none of
+them blocked.
 
 Extraction with a random core set
 ---------------------------------
@@ -446,11 +371,18 @@ Reproducing this
 
 The scripts behind this page are not shipped with the package, since Recon3D
 is not redistributed here. Get the model from the
-`SPECTRA repository <https://github.com/bisect-group/spectra>`_ at
+`SPECTRA repository <https://github.com/bisect-group/SPECTRA>`_ at
 ``Recon3D+/consRecon3DGeneSymbol.mat``. Note that cobrapy's
 ``load_matlab_model`` rejects it, because the GeneSymbol variant has duplicate
 gene symbols; load the stoichiometry with :mod:`scipy.io` and build the model
 without gene annotation.
+
+References
+----------
+
+* Brunk, E., Sahoo, S., Zielinski, D. C., et al. (2018). Recon3D enables a
+  three-dimensional view of gene variation in human metabolism. *Nature
+  Biotechnology*, 36(3), 272–281. https://doi.org/10.1038/nbt.4072
 
 Next
 ----

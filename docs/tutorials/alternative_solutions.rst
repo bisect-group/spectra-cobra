@@ -7,6 +7,12 @@ tie-breaking inside the solver. ``n_solutions`` asks for more than one.
 
 .. code-block:: python
 
+   from cobra.io import load_model
+   from spectra_cobra import spectra_cc, spectra_me
+
+   model = load_model("textbook")
+   consistent = spectra_cc(model, tol=1e-3)
+
    models = spectra_me(consistent, ["PGI"], tol=1e-3, n_solutions=3)
 
 With ``n_solutions=1`` (the default) you get a model. With more, you get a

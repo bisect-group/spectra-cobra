@@ -7,7 +7,7 @@ inputs and outputs, adding any reactions the task defines, and asking whether
 the result is feasible.
 
 Tasks matter for extraction because of one observation. Requiring a model to
-perform a task is awkward to express as a constraint, but requiring it to
+perform a task is difficult to express as a constraint, but requiring it to
 *contain a reaction* is exactly what :func:`spectra_cobra.spectra_me` already
 does. So compute, for each task, the reactions without which the task becomes
 infeasible, and hand their union to the extraction as core reactions.

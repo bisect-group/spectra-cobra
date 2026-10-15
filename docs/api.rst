@@ -35,12 +35,6 @@ Formulations
 .. autofunction:: spectra_cobra.growth_optim
    :no-index:
 
-Flux
-----
-
-.. autofunction:: spectra_cobra.flux_reducer
-   :no-index:
-
 Verification
 ------------
 

@@ -23,7 +23,7 @@ want to supply the reaction directions yourself.
      - non-negative
    * - ``"tradeOff"``
      - :func:`~spectra_cobra.trade_off`
-     - maximise weighted count of kept reactions
+     - maximise net weight: positive in, negative out
      - **any real**
    * - ``"growthOptim"``
      - :func:`~spectra_cobra.growth_optim`
@@ -121,7 +121,8 @@ The mathematics
    \qquad \text{s.t.} \quad lb_i z_i \le v_i \le ub_i z_i, \;
                            z_i \in \{0, 1\}
 
-**tradeOff** maximises the weighted count of included reactions. A free
+**tradeOff** maximises the net weight of the included reactions, so a
+positive weight pushes a reaction in and a negative one pushes it out. A free
 irreversible reaction gets one binary; a free *reversible* one gets two more,
 :math:`a_i` for running forward and :math:`b_i` for backward, with
 :math:`a_i + b_i = z_i` so at most one direction is active:

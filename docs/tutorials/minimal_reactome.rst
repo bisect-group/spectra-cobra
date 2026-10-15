@@ -96,7 +96,19 @@ The medium decides
 ------------------
 
 The textbook *E. coli* core model, 95 reactions, with the growth requirement
-set to all of what the medium allows and to half of it:
+set to all of what the medium allows and to half of it. The other three media
+are the glucose one with the carbon source swapped, or the oxygen closed:
+
+.. code-block:: python
+
+   acetate = {**glucose, "EX_glc__D_e": 0.0, "EX_ac_e": -10.0}
+   succinate = {**glucose, "EX_glc__D_e": 0.0, "EX_succ_e": -10.0}
+   anaerobic = {**glucose, "EX_o2_e": 0.0}
+
+   on_glucose, on_acetate, on_succinate, on_anaerobic = (
+       minimal_reactome(model, medium=medium)
+       for medium in (glucose, acetate, succinate, anaerobic)
+   )
 
 .. list-table::
    :header-rows: 1
@@ -138,7 +150,7 @@ pathway (``GLCpts``, ``PFK``, ``PYK``, ``PDH``, ``G6PDH2r``, ``GND``,
 
 .. code-block:: python
 
-   set(acetate.kept) - set(glucose.kept)
+   set(on_acetate.kept) - set(on_glucose.kept)
 
 .. code-block:: text
 

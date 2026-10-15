@@ -22,7 +22,7 @@ together.
      - non-negative
      - 1 MILP
    * - ``"tradeOff"``
-     - maximise weighted count of kept reactions
+     - maximise net weight: positive in, negative out
      - **any real**
      - 1 MILP
    * - ``"growthOptim"``
@@ -182,7 +182,9 @@ Which one should I use?
   you can afford a MILP.
 * **Use ``tradeOff``** when you have signed evidence. Do not use it with
   default weights.
-* **Use ``growthOptim``** when the extracted model has to grow.
+* **Use ``growthOptim``** when growth belongs in the objective. Any of them
+  can return a growing model — put biomass in the core set, or bound it —
+  but this is the one that trades biomass off against flux.
 
 Next
 ----

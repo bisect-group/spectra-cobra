@@ -240,6 +240,10 @@ the thing it *is*:
 .. code-block:: python
 
    import re
+   from cobra.io import load_matlab_model, load_model
+
+   bigg_model = load_model("textbook")              # spells it ``glc__D_e``
+   agora_model = load_matlab_model("agora.mat")     # spells it ``glc_D[e]``
 
    build_community_model(
        [bigg_model, agora_model],
@@ -328,7 +332,35 @@ allowed to borrow — and its own draft supplies the bounds:
 
 .. code-block:: python
 
+   from cobra import Metabolite, Model, Reaction
    from spectra_cobra import build_community_model
+
+   RECIPES = {
+       "UP": {"glc_e": -1.0, "a_c": 1.0},
+       "R1": {"a_c": -1.0, "b_c": 1.0},
+       "R2": {"b_c": -1.0, "c_c": 1.0},
+       "BIO": {"c_c": -1.0},
+   }
+
+   def chain_model(model_id, reaction_ids):
+       """The glc -> a -> b -> c chain, holding only the named reactions."""
+       model = Model(model_id)
+       mets = {m: Metabolite(m, compartment=m.rsplit("_", 1)[1])
+               for m in ("glc_e", "a_c", "b_c", "c_c")}
+       for rxn_id in reaction_ids:
+           reaction = Reaction(rxn_id, lower_bound=0.0, upper_bound=1000.0)
+           reaction.add_metabolites(
+               {mets[m]: coeff for m, coeff in RECIPES[rxn_id].items()})
+           model.add_reactions([reaction])
+       uptake = Reaction("EX_glc_e", lower_bound=-10.0, upper_bound=1000.0)
+       uptake.add_metabolites({mets["glc_e"]: -1.0})
+       model.add_reactions([uptake])
+       model.objective = "BIO"
+       return model
+
+   chain = chain_model("chain", ["UP", "R1", "R2", "BIO"])   # the database
+   draft_a = chain_model("A", ["UP", "R1", "BIO"])           # cannot finish
+   draft_b = chain_model("B", ["R2", "BIO"])                 # cannot start
 
    community = build_community_model(
        [draft_a, draft_b],
@@ -338,7 +370,7 @@ allowed to borrow — and its own draft supplies the bounds:
    )
 
    community.database_reactions["A"]   # ('R2__A',)
-   community.database_reactions["B"]   # ('UP__B', 'R1__B')
+   community.database_reactions["B"]   # ('R1__B', 'UP__B')
 
 ``pool_medium`` is what the environment offers, keyed by metabolite as your
 own models spell it. Everything unnamed stays shut to uptake.
@@ -551,6 +583,13 @@ only ever meets ``tis2``:
 
    from spectra_cobra import build_multi_tissue_model
 
+   # The reference network, and the two sets of bounds the body is built with.
+   # Substitute your own: ``pool_medium`` is what the blood offers, and
+   # ``link_bounds`` the per-tissue uptake rates you have measured.
+   gem = load_model("iJO1366")   # or Recon3D, converted -- see :doc:`recon3d`
+   blood_medium = {"glc_D_e": (-1.0, 1000.0), "o2_e": (-1000.0, 1000.0)}
+   measured_rates = {"tis1": {"glc_D_e": (-0.5, 1000.0)}}
+
    body = build_multi_tissue_model(
        gem,
        tissues=["tis1", "tis2", "tis3"],
@@ -627,6 +666,10 @@ the union of each tissue's core reactions, tagged:
 .. code-block:: python
 
    from spectra_cobra import spectra_me
+
+   # ATP maintenance and a maintenance biomass reaction, in every tissue.
+   cores = {tissue: ["DM_atp_c_", "biomass_maintenance"]
+            for tissue in ("tis1", "tis2", "tis3", "tis4")}
 
    core = [f"{rxn}__{tissue}" for tissue, rxns in cores.items() for rxn in rxns]
    extracted = spectra_me(body.model, core, tol=1e-4, problem_type="minNetLP")
@@ -721,6 +764,32 @@ complete (SAAC) medium.
 
 .. code-block:: python
 
+The drafts are CarveMe reconstructions, the universals CarveMe's own, and
+the SAAC medium is tabulated as ``hCOM_community/SAACmedia.xlsx`` in the
+`SPECTRA repository <https://github.com/bisect-group/SPECTRA>`_:
+
+.. code-block:: python
+
+   from pathlib import Path
+
+   import pandas as pd
+   from cobra.io import read_sbml_model
+
+   # One CarveMe draft per organism, and CarveMe's own universals, picked
+   # per organism by Gram stain.
+   names = sorted(p.stem for p in Path("CarvemeDraftModels").glob("*.xml"))
+   drafts = [read_sbml_model(f"CarvemeDraftModels/{name}.xml") for name in names]
+   gram = dict(pd.read_csv("gram_stain.csv").itertuples(index=False))
+   universals = {stain: read_sbml_model(f"Universal_models/carveme_{stain}.xml")
+                 for stain in ("positive", "negative")}
+   universal_for = {name: universals[gram[name]] for name in names}
+
+   # The SAAC medium, as uptake bounds on the shared compartment.
+   saac = {row.metabolite: (-row.uptake, 1000.0)
+           for row in pd.read_excel("SAACmedia.xlsx").itertuples()}
+
+.. code-block:: python
+
    community = build_community_model(
        drafts,
        organisms=names,
@@ -750,6 +819,24 @@ reaction.
    metabolites, genes, bounds and GPRs but not the solver, which is then
    reattached. You will see a warning saying so. Renaming the reaction
    avoids the detour.
+
+References
+----------
+
+* Machado, D., Andrejev, S., Tramontano, M., and Patil, K. R. (2018). Fast
+  automated reconstruction of genome-scale metabolic models for microbial
+  species and communities. *Nucleic Acids Research*, 46(15), 7542–7553.
+  https://doi.org/10.1093/nar/gky537
+* Magnúsdóttir, S., Heinken, A., Kutt, L., et al. (2017). Generation of
+  genome-scale metabolic reconstructions for 773 members of the human gut
+  microbiota. *Nature Biotechnology*, 35(1), 81–89.
+  https://doi.org/10.1038/nbt.3703
+* Brunk, E., Sahoo, S., Zielinski, D. C., et al. (2018). Recon3D enables a
+  three-dimensional view of gene variation in human metabolism. *Nature
+  Biotechnology*, 36(3), 272–281. https://doi.org/10.1038/nbt.4072
+* Cheng, A. G., Ho, P.-Y., Aranda-Díaz, A., et al. (2022). Design,
+  construction, and in vivo augmentation of a complex gut microbiome. *Cell*,
+  185(19), 3617–3636. https://doi.org/10.1016/j.cell.2022.08.003
 
 Reference
 ---------

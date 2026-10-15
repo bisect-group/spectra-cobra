@@ -37,36 +37,10 @@ possible towards the flux threshold at once, until that set stops shrinking:
 :math:`J^{rev}` the reversible ones among them, and :math:`w_i` are drawn
 uniformly from [1, 1.1] to break ties.
 
-Unlike FASTCC, no reaction flipping is needed. The forward LP's auxiliary
-variable :math:`z_i` is unbounded from below, so a reaction that can only
-carry negative flux simply fails to contribute to that LP and is picked up by
-the reverse LP instead.
-
-Relation to cobrapy's own ``spectra_cc``
-----------------------------------------
-
-cobrapy ships a version of this check as
-:func:`cobra.flux_analysis.spectra_cc`. The two differ deliberately:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 34 33 33
-
-   * -
-     - cobrapy's
-     - this package's
-   * - ``consistency_type``
-     - steady state only
-     - both modes
-   * - detection default
-     - ``model.tolerance``
-     - ``0.99 * tol``
-
-cobrapy's counts any nonzero flux, so it agrees exactly with ``fastcc`` and
-``find_blocked_reactions``. This one is stricter by default: a reaction must
-reach ``tol`` itself, which also drops reactions that can carry *some* flux
-but never as much as ``tol``. Either behaviour is reachable from either
-package by setting the cutoff explicitly.
+No reaction flipping is needed. The forward LP's auxiliary variable
+:math:`z_i` is unbounded from below, so a reaction that can only carry
+negative flux simply fails to contribute to that LP and is picked up by the
+reverse LP instead.
 
 Reference
 ---------

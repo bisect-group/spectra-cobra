@@ -9,7 +9,7 @@ Formulation         Objective                                   Weights
 ==================  ==========================================  ==============
 ``min_net_lp``      minimise weighted total absolute flux       non-negative
 ``min_net_milp``    minimise weighted reaction count            non-negative
-``trade_off``       maximise weighted included reaction count   any real
+``trade_off``       maximise net weight of included reactions   any real
 ``growth_optim``    maximise biomass minus weighted flux        non-negative
 ==================  ==========================================  ==============
 

@@ -26,37 +26,6 @@ Usage
    print(result.summary())
    print(result.added)
 
-Growth is a bound, not a tolerance
-----------------------------------
-
-``min_growth`` puts a lower bound on the biomass reaction. ``tol`` stays at
-the value any extraction would use.
-
-The alternative — making biomass the core reaction and raising ``tol`` to
-the growth rate — appears to work and does not. ``tol`` is the flux *every*
-core reaction must carry, so setting it to 0.1 to mean "grow at 0.1" also
-demands 0.1 through every other core reaction you name, which is rarely
-what you meant. Keeping them apart also makes the answer stop moving: on
-iJO1366 the same 15 reactions come back at every tolerance from ``1e-4`` to
-``1e-7``, where the conflated version silently returned a model that did
-not grow at all below ``0.01``.
-
-``min_growth`` defaults to 0.1, a plausible rate rather than a measured one.
-Pass your own where you have one.
-
-Why tradeOff is not offered
----------------------------
-
-:func:`~spectra_cobra.gapfill_for_growth` refuses ``problem_type="tradeOff"``
-rather than letting it fail at solve time. ``tradeOff`` requires every
-included reaction to carry at least ``tol``, and a growth solution needs
-trace fluxes far below that — on iJO1366, 24 of the 442 active reactions
-carry less than ``1e-4``, the smallest ``1.96e-06``. It is infeasible at
-every tolerance, with or without the growth bound.
-
-Use it for :doc:`../tutorials/gapfilling_tasks`, where the requirement is a
-set of reactions rather than biomass, and it works.
-
 Filling a whole community at once
 ---------------------------------
 

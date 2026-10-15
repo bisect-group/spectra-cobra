@@ -62,6 +62,14 @@ On the textbook model, across nine carbon sources:
            model.reactions.get_by_id(ex_id).lower_bound = -1000.0
        model.reactions.get_by_id(carbon).lower_bound = -uptake
 
+   # The media the universal model actually grows in -- all nine, here.
+   usable = []
+   for carbon in CARBON:
+       with universal:
+           medium(universal, carbon)
+           if universal.slim_optimize(error_value=0.0) > 1e-6:
+               usable.append(carbon)
+
 Closing everything first matters: a medium is defined by what it *lacks* as
 much as by what it supplies, and a model's default bounds usually leave far
 more open than you intend.
@@ -93,6 +101,13 @@ glucose makes unnecessary. Each medium contributes its own constraints, which
 is the reason to gap-fill against a panel rather than a single condition.
 
 **A draft with gaps**, and it grows nowhere:
+
+.. code-block:: python
+
+   draft = universal.copy()
+   draft.remove_reactions(["ENO", "ACONTb", "SUCDi", "NH4t"],
+                          remove_orphans=False)
+   draft_ids = {rxn.id for rxn in draft.reactions}
 
 .. code-block:: text
 

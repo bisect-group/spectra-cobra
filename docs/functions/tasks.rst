@@ -36,7 +36,7 @@ output.
 Why this is here
 ----------------
 
-Requiring a model to *perform a task* is awkward to express as a constraint
+Requiring a model to *perform a task* is difficult to express as a constraint
 on an extraction. Requiring it to *contain a reaction* is exactly what
 :doc:`spectra_me` already does. So compute, for each task, the reactions
 without which it becomes infeasible, and hand their union to the extraction
@@ -62,7 +62,7 @@ a solution that leaves it at zero stays available when it is fixed to zero.
 The search therefore starts from the reactions one solution uses and shrinks
 that set by repeatedly minimising the total flux through whatever is left,
 which rules out in a single LP every reaction some other route can avoid.
-Only the survivors are tested individually. On iJO1366, 23 tasks took 5.3 s.
+Only the survivors are tested individually. On iJO1366, 23 tasks took 5.1 s.
 
 Reference
 ---------
