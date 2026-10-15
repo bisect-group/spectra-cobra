@@ -2,8 +2,9 @@ Communities, tissues and minimal microbiomes
 ============================================
 
 :func:`~spectra_cobra.build_community_model` joins models into one network
-whose parts trade through a pool. The parts may be organisms of a community
-or tissues of a body; nothing in the construction distinguishes them.
+whose parts trade metabolites through a pool. The parts may be organisms
+of a community or tissues of a body; nothing in the construction
+distinguishes them.
 :func:`~spectra_cobra.build_multi_tissue_model` is the same routine with one
 reference network replicated for you.
 :func:`~spectra_cobra.minimal_microbiome` reduces a community to the

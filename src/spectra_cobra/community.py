@@ -1,4 +1,4 @@
-"""Joining models into one network whose parts trade with each other.
+"""Joining models into one network whose parts trade metabolites.
 
 The parts may be organisms of a microbial community or tissues of a body.
 Nothing in the construction distinguishes them, so this module calls them
@@ -963,7 +963,7 @@ def build_community_model(
     check: bool = True,
     model_id: str = "community",
 ) -> CommunityModel:
-    """Join models into one network whose units trade through a pool.
+    """Join models into one network whose units trade metabolites via a pool.
 
     Parameters
     ----------
