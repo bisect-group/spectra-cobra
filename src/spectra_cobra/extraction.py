@@ -574,12 +574,18 @@ def spectra_me(
         (default 7200).
     inclusion_cutoff : float, optional
         The absolute flux at which a reaction counts as part of the extracted
-        model, for the LP formulations (default ``tol * 1e-7``). The default
-        is far below the solver's own tolerance on purpose: raising it drops
-        reactions that carry almost no flux but are load-bearing for a mass
-        balance, which leaves core reactions present in the result yet unable
-        to carry flux. The mixed-integer formulations ignore it, since they
-        read their answer off their binaries.
+        model (default ``tol * 1e-7``). The default is far below the solver's
+        own tolerance on purpose: raising it drops reactions that carry almost
+        no flux but are load-bearing for a mass balance, which leaves core
+        reactions present in the result yet unable to carry flux.
+
+        For the LP formulations this is the whole rule. The mixed-integer
+        formulations take the **union** of their binaries and this rule, so a
+        reaction can be in the result with its binary switched off, having
+        got there on flux alone; the cutoff can only ever add to what the
+        binaries chose, never remove from it. Pass ``return_solutions=True``
+        and compare ``MilpSolution.selected`` with ``MilpSolution.included``
+        to see which reactions arrived by which route.
     remove_genes : bool, optional
         Whether to drop the genes left without a reaction by the extraction
         (default True). Orphaned metabolites are always dropped.
@@ -841,12 +847,18 @@ def spectra_ccme(
         (default 7200).
     inclusion_cutoff : float, optional
         The absolute flux at which a reaction counts as part of the extracted
-        model, for the LP formulations (default ``tol * 1e-7``). The default
-        is far below the solver's own tolerance on purpose: raising it drops
-        reactions that carry almost no flux but are load-bearing for a mass
-        balance, which leaves core reactions present in the result yet unable
-        to carry flux. The mixed-integer formulations ignore it, since they
-        read their answer off their binaries.
+        model (default ``tol * 1e-7``). The default is far below the solver's
+        own tolerance on purpose: raising it drops reactions that carry almost
+        no flux but are load-bearing for a mass balance, which leaves core
+        reactions present in the result yet unable to carry flux.
+
+        For the LP formulations this is the whole rule. The mixed-integer
+        formulations take the **union** of their binaries and this rule, so a
+        reaction can be in the result with its binary switched off, having
+        got there on flux alone; the cutoff can only ever add to what the
+        binaries chose, never remove from it. Pass ``return_solutions=True``
+        and compare ``MilpSolution.selected`` with ``MilpSolution.included``
+        to see which reactions arrived by which route.
     remove_genes : bool, optional
         Whether to drop the genes left without a reaction by the extraction
         (default True). Orphaned metabolites are always dropped.
