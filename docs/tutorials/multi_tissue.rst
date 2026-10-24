@@ -25,6 +25,92 @@ A multi-tissue model
 Tissues need the ``"pooled"`` mode, for two reasons: they do not all meet in
 the same place, and measured uptake rates attach to the transports.
 
+What ``"pooled"`` builds is a private external compartment per tissue and a
+transport reaction from it into each pool that tissue reaches. That is what
+lets one tissue belong to more than one pool at once:
+
+.. graphviz::
+   :caption: ``mode="pooled"``, with two pools. ``B`` is in both, and can be
+             because it keeps its own ``glc[e]`` and runs a separate
+             transport into each. ``u1`` reaches the environment; ``u2`` is an
+             interface between ``B`` and ``C`` and stays closed. Each ``TR_``
+             belongs to one tissue, which is what ``link_bounds`` attaches a
+             measured rate to.
+   :align: center
+
+   digraph pooled {
+     rankdir=LR; bgcolor="transparent"; compound=true; nodesep=0.30;
+     ranksep=0.55;
+     node [fontname="Helvetica", fontsize=10];
+     edge [fontname="Helvetica", fontsize=9, color="#6b7280", arrowsize=0.7];
+
+     subgraph cluster_a {
+       label="tissue A"; labeljust=l; fontname="Helvetica"; fontsize=9;
+       fontcolor="#3c6997"; color="#c7d6e8"; style="rounded,filled";
+       fillcolor="#f6f9fd"; margin=10;
+       glcA [label="glc[e]", shape=ellipse, style=filled, fillcolor="#e8f0fa",
+             color="#3c6997", fontcolor="#1b3a57"];
+       trA1 [label="TR_glc_u1", shape=box, style="filled,rounded", width=1.0,
+             height=0.26, fillcolor="#ffffff", color="#3c6997",
+             fontcolor="#1b3a57"];
+       glcA -> trA1 [dir=both];
+     }
+
+     subgraph cluster_b {
+       label="tissue B  —  in both pools"; labeljust=l; fontname="Helvetica";
+       fontsize=9; fontcolor="#b3411f"; color="#e2bfaf";
+       style="rounded,filled"; fillcolor="#fdf6f3"; margin=10;
+       glcB [label="glc[e]", shape=ellipse, style=filled, fillcolor="#e8f0fa",
+             color="#3c6997", fontcolor="#1b3a57"];
+       trB1 [label="TR_glc_u1", shape=box, style="filled,rounded", width=1.0,
+             height=0.26, fillcolor="#ffffff", color="#3c6997",
+             fontcolor="#1b3a57"];
+       trB2 [label="TR_glc_u2", shape=box, style="filled,rounded", width=1.0,
+             height=0.26, fillcolor="#ffffff", color="#3c6997",
+             fontcolor="#1b3a57"];
+       glcB -> trB1 [dir=both];
+       glcB -> trB2 [dir=both];
+     }
+
+     subgraph cluster_c {
+       label="tissue C"; labeljust=l; fontname="Helvetica"; fontsize=9;
+       fontcolor="#3c6997"; color="#c7d6e8"; style="rounded,filled";
+       fillcolor="#f6f9fd"; margin=10;
+       glcC [label="glc[e]", shape=ellipse, style=filled, fillcolor="#e8f0fa",
+             color="#3c6997", fontcolor="#1b3a57"];
+       trC2 [label="TR_glc_u2", shape=box, style="filled,rounded", width=1.0,
+             height=0.26, fillcolor="#ffffff", color="#3c6997",
+             fontcolor="#1b3a57"];
+       glcC -> trC2 [dir=both];
+     }
+
+     u1 [label="glc_u1", shape=ellipse, style=filled, fillcolor="#fdf0e3",
+         color="#c07d2a", fontcolor="#6b4411", penwidth=1.6];
+     u2 [label="glc_u2", shape=ellipse, style=filled, fillcolor="#fdf0e3",
+         color="#c07d2a", fontcolor="#6b4411", penwidth=1.6];
+     ex [label="EX_glc_u1", shape=box, style="filled,rounded", width=1.0,
+         height=0.26, fillcolor="#ffffff", color="#c07d2a",
+         fontcolor="#6b4411"];
+     env [label="environment", shape=plaintext, fontcolor="#9ca3af",
+          fontsize=9];
+     shut [label="no exchange —\nclosed to the outside", shape=plaintext,
+           fontcolor="#b3411f", fontsize=8.5];
+
+     trA1 -> u1 [dir=both, color="#c07d2a"];
+     trB1 -> u1 [dir=both, color="#c07d2a"];
+     trB2 -> u2 [dir=both, color="#c07d2a"];
+     trC2 -> u2 [dir=both, color="#c07d2a"];
+     u1 -> ex [dir=both, color="#c07d2a"];
+     ex -> env [dir=both, style=dashed, color="#c9ced6"];
+     u2 -> shut [dir=none, style=dotted, color="#d8b2a6"];
+   }
+
+A community is normally built the other way, with ``mode="shared"``: one
+external compartment for everyone, no transports, and therefore exactly one
+pool. :doc:`community` has that figure. The trade is size — one transport
+per tissue per metabolite is affordable across five tissues and is not
+across a hundred organisms.
+
 Suppose three tissues. ``tis1`` and ``tis2`` are perfused by blood; ``tis3``
 only ever meets ``tis2``:
 

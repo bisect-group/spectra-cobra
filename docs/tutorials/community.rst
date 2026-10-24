@@ -1,12 +1,9 @@
 Microbial community models
 ==========================
 
-A community is several organisms sharing an environment. Each one brings its
-own reconstruction — *Bacteroides* and *E. coli* are different organisms with
-different metabolism, and their models have different reactions, different
-metabolites and different gene associations. They are not copies of anything.
+A community is several prokaryotes sharing an environment.
 
-What a community model does is put those distinct networks side by side in
+What a community model does is put each member's network side by side in
 one model, tag each one so its reactions cannot be confused with another's,
 and give them somewhere to pass metabolites to each other. One organism's
 secretion arrives there and becomes available to the rest, which is what
@@ -30,9 +27,9 @@ independently.
 
 A **pool** is a compartment that several organisms can reach. It is the only
 way one organism's output becomes another's input. A community usually has a
-single pool — the gut lumen, the medium everyone sits in — but it may have
-more, where some members are in contact with each other and not with the
-rest, such as a biofilm layer that only its neighbours reach.
+single pool, the medium everyone sits in, but it may have more, where some
+members are in contact with each other and not with the rest, such as a
+biofilm layer that only its neighbours reach.
 
 An **exchange** connects a pool to the environment outside the whole system.
 Only the pools you nominate get them. This is deliberate and it matters: a
@@ -76,63 +73,12 @@ draft model has ``EX_glc_e`` so it can eat; leave that in place and every
 organism feeds itself directly from the environment, the pool is decorative, and
 nothing is a community at all.
 
-Two ways to build a pool
-------------------------
+How the pool is built
+---------------------
 
-``mode="pooled"`` — each organism keeps a private external compartment, and a
-transport reaction carries each metabolite between it and the pool:
-
-.. graphviz::
-   :caption: ``mode="pooled"``. Each organism's own ``glc[e]`` is distinct, and
-             ``TR_`` reactions move glucose into the shared ``glc_u``. The
-             transports belong to an organism, so they can be bounded per organism.
-   :align: center
-
-   digraph pooled {
-     rankdir=LR; bgcolor="transparent"; compound=true; nodesep=0.28; ranksep=0.5;
-     node [fontname="Helvetica", fontsize=10];
-     edge [fontname="Helvetica", fontsize=9, color="#6b7280", arrowsize=0.7];
-
-     subgraph cluster_a {
-       label="organism A"; labeljust=l; fontname="Helvetica"; fontsize=9;
-       fontcolor="#3c6997"; color="#c7d6e8"; style="rounded,filled";
-       fillcolor="#f6f9fd"; margin=10;
-       glcA [label="glc[e]", shape=ellipse, style=filled, fillcolor="#e8f0fa",
-             color="#3c6997", fontcolor="#1b3a57"];
-       trA  [label="TR_glc_u", shape=box, style="filled,rounded", width=0.9,
-             height=0.26, fillcolor="#ffffff", color="#3c6997",
-             fontcolor="#1b3a57"];
-       glcA -> trA [dir=both];
-     }
-     subgraph cluster_b {
-       label="organism B"; labeljust=l; fontname="Helvetica"; fontsize=9;
-       fontcolor="#3c6997"; color="#c7d6e8"; style="rounded,filled";
-       fillcolor="#f6f9fd"; margin=10;
-       glcB [label="glc[e]", shape=ellipse, style=filled, fillcolor="#e8f0fa",
-             color="#3c6997", fontcolor="#1b3a57"];
-       trB  [label="TR_glc_u", shape=box, style="filled,rounded", width=0.9,
-             height=0.26, fillcolor="#ffffff", color="#3c6997",
-             fontcolor="#1b3a57"];
-       glcB -> trB [dir=both];
-     }
-
-     pool [label="glc_u", shape=ellipse, style=filled, fillcolor="#fdf0e3",
-           color="#c07d2a", fontcolor="#6b4411", penwidth=1.6];
-     ex   [label="EX_glc_u", shape=box, style="filled,rounded", width=0.9,
-           height=0.26, fillcolor="#ffffff", color="#c07d2a",
-           fontcolor="#6b4411"];
-     env  [label="environment", shape=plaintext, fontcolor="#9ca3af",
-           fontsize=9];
-
-     trA -> pool [dir=both, color="#c07d2a"];
-     trB -> pool [dir=both, color="#c07d2a"];
-     pool -> ex [dir=both, color="#c07d2a"];
-     ex -> env [dir=both, style=dashed, color="#c9ced6"];
-   }
-
-``mode="shared"`` — the organisms share the external compartment itself. One row
-of the stoichiometric matrix per exchangeable metabolite, for the whole
-community, and no transports at all:
+``mode="shared"`` is what a community wants: the organisms share the external
+compartment itself. One row of the stoichiometric matrix per exchangeable
+metabolite, for the whole community, and no transport reactions at all.
 
 .. graphviz::
    :caption: ``mode="shared"``. There is one ``glc[e]`` and both organisms
@@ -176,31 +122,23 @@ community, and no transports at all:
      ex -> env [dir=both, style=dashed, color="#c9ced6"];
    }
 
-Which to use:
+.. note::
 
-.. list-table::
-   :header-rows: 1
-   :widths: 28 36 36
+   The other mode, ``mode="pooled"``, gives each organism a private external
+   compartment and a transport reaction into the pool. That buys two things a
+   community rarely needs and always pays for: **several pools**, so a member
+   can meet one group of organisms in one place and another group somewhere
+   else, and **per-organism bounds** on what crosses into each pool, through
+   ``link_bounds``.
 
-   * -
-     - ``"pooled"``
-     - ``"shared"``
-   * - pools
-     - as many as you like
-     - exactly one
-   * - per-organism bounds on what crosses
-     - yes, through ``link_bounds``
-     - no reaction to bound
-   * - size
-     - one transport per organism per metabolite
-     - nothing extra
-   * - use it for
-     - measured uptake and secretion rates
-     - large communities
+   It costs one transport per organism per exchangeable metabolite. A hundred
+   organisms across a thousand metabolites is a hundred thousand extra
+   reactions in ``"pooled"`` and none in ``"shared"`` — the difference
+   between a model you can build and one you cannot.
 
-The size difference is not cosmetic. A hundred organisms across a thousand
-exchangeable metabolites is a hundred thousand transport reactions in
-``"pooled"`` and none in ``"shared"``.
+   :doc:`multi_tissue` is where that structure earns its keep, and shows it
+   drawn out: tissues genuinely do not all meet in the same place, and the
+   uptake rates you measure are per tissue.
 
 Which metabolites are exchangeable
 ----------------------------------
