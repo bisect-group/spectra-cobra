@@ -112,7 +112,9 @@ def test_fva_refuses_topology(blocked_model: Model) -> None:
     from spectra_cobra import SpectraError
 
     with pytest.raises(SpectraError, match="topology"):
-        check_extraction(blocked_model, ["R1"], consistency_type="topology")
+        check_extraction(
+            blocked_model, ["R1"], consistency_type="topology", method="fva"
+        )
 
 
 def test_report_is_constructible_directly() -> None:
@@ -146,9 +148,14 @@ def test_both_methods_agree_on_a_clean_model(toy_model: Model) -> None:
     assert set(by_fva.blocked) == set(by_spectra.blocked)
 
 
-def test_fva_is_the_default(blocked_model: Model) -> None:
-    """The default method is the authoritative one."""
-    default = check_extraction(blocked_model, ["R1"])
-    by_fva = check_extraction(blocked_model, ["R1"], method="fva")
+def test_spectra_is_the_default(blocked_model: Model) -> None:
+    """The default method is the fast one.
 
-    assert set(default.blocked) == set(by_fva.blocked)
+    FVA is two LPs per reaction and becomes impractical at genome scale, so
+    the consistency check is what runs unless you ask otherwise. The two
+    agree; test_methods_agree is what holds them to that.
+    """
+    default = check_extraction(blocked_model, ["R1"])
+    by_spectra = check_extraction(blocked_model, ["R1"], method="spectra")
+
+    assert set(default.blocked) == set(by_spectra.blocked)

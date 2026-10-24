@@ -167,7 +167,7 @@ def check_extraction(
     consistency_type: str = STOICHIOMETRY,
     detection_cutoff: Optional[float] = None,
     seed: Optional[int] = None,
-    method: str = "fva",
+    method: str = "spectra",
 ) -> ExtractionReport:
     """Check an extracted model against what the extraction promised.
 
@@ -193,16 +193,15 @@ def check_extraction(
         for ``method="fva"``).
     seed : int, optional
         A seed for the consistency check's random coefficients (default None).
-    method : {"fva", "spectra"}, optional
-        How to decide whether a reaction is blocked (default "fva"). Only
-        ``"spectra"`` supports ``consistency_type="topology"``.
-        ``"fva"`` maximises and minimises each reaction in turn with
-        :func:`cobra.flux_analysis.find_blocked_reactions`, which is slow but
-        authoritative. ``"spectra"`` reuses this package's own consistency
-        check, which is far quicker but **can report a dead reaction as
-        consistent** on a model holding numerically marginal reactions —
-        exactly the models an LP extraction produces. Use it only when the
-        speed matters more than the answer.
+    method : {"spectra", "fva"}, optional
+        How to decide whether a reaction is blocked (default "spectra").
+        ``"spectra"`` reuses this package's own consistency check, which
+        converges in a few passes over the whole model. ``"fva"`` maximises
+        and minimises each reaction in turn with
+        :func:`cobra.flux_analysis.find_blocked_reactions`, which is two LPs
+        per reaction and becomes impractical at genome scale. Only
+        ``"spectra"`` supports ``consistency_type="topology"``, since FVA
+        always assumes a steady state.
 
     Returns
     -------
@@ -222,10 +221,16 @@ def check_extraction(
 
     Notes
     -----
-    The default is the slow, trustworthy option on purpose. Measured on
-    Recon3D extractions, the ``"spectra"`` method reported no blocked core
-    reactions where FVA found four, so a fast check here would hand back
-    false assurance about the very thing being checked.
+    The default was ``"fva"`` while ``inclusion_cutoff`` was floored at
+    ``model.tolerance``: extractions then held numerically marginal reactions
+    that the LP-driven check could call consistent when they were dead, and on
+    Recon3D it reported no blocked core reactions where FVA found four. With
+    the current cutoff the two agree, and ``"spectra"`` is an order of
+    magnitude faster — 0.4 s against 4 s on a 1286-reaction extraction of
+    Recon3D, widening with the model — so it is the default.
+
+    ``"fva"`` remains available as an independent second opinion, which is
+    worth taking if you have raised ``inclusion_cutoff`` yourself.
 
     """
     if method not in ("fva", "spectra"):
