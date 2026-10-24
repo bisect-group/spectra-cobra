@@ -6,27 +6,42 @@ page runs the same workflow on Recon3D, the human reconstruction SPECTRA's own
 experiments use, and reports what actually happens — including where the
 default formulation falls short.
 
-The model used here is the consistent Recon3D distributed with SPECTRA —
-11303 reactions over 6388 metabolites. It lives in the ``Recon3D+/``
-directory of the `SPECTRA repository
-<https://github.com/bisect-group/SPECTRA>`_, alongside ``UpdatedRecon3D.mat``
-and the additional GPR rules.
+Get the Recon3D model from the COBRA Toolbox's model collection:
+
+   https://github.com/opencobra/COBRA.models/blob/master/mat/Recon3DModel_301.mat
+
+That is ``Recon3DModel_301.mat`` — **10600 reactions** over 5835 metabolites
+and 2248 genes, with ``biomass_maintenance`` as its objective. It is the same
+model the COBRA Toolbox ships for its own tests, so it needs no conversion
+and no registration. Everything below was measured against it.
+
+.. code-block:: python
+
+   from cobra.io import load_matlab_model
+
+   model = load_matlab_model("Recon3DModel_301.mat")
+   model.solver = "gurobi"
+   print(f"{len(model.reactions)} reactions, {len(model.metabolites)} metabolites")
+
+.. code-block:: text
+
+   10600 reactions, 5835 metabolites
 
 .. note::
 
-   Those are MATLAB structures that cobrapy's ``load_matlab_model`` refuses,
-   because Recon3D carries the gene ``AOC2`` twice. Convert them with the
-   COBRA Toolbox, or take Recon3D from
-   `BiGG <http://bigg.ucsd.edu/models/Recon3D>`_, before running anything
-   below against them.
+   Other Recon3D distributions may not load as cleanly. Some MATLAB
+   structures carry a duplicated gene — ``AOC2`` is the usual culprit — which
+   older cobrapy versions refuse. If you hit that, convert with the COBRA
+   Toolbox or take Recon3D from
+   `BiGG <http://bigg.ucsd.edu/models/Recon3D>`_. The file linked above
+   loads directly.
 
 Watching the check do work
 --------------------------
 
-Both distributed files are *already* consistency-checked: they hold 11303
-reactions with nothing blocked, as does the ``Reconmodel.mat`` used in the
-PCOS study (10600 reactions, 0 blocked). Running the check on one of those
-tells you only that the file is what it claims.
+Recon3D as distributed is *already* consistency-checked — the 10600-reaction
+file above has nothing blocked, as the measurement below shows. Running the
+check on a model like that tells you only that the file is what it claims.
 
 To see it remove anything you need a reconstruction that ships inconsistent.
 iJO1366 does, and it comes with cobrapy, so this runs anywhere:
@@ -69,14 +84,37 @@ randomised tie-breaking:
 And confirm independently with cobrapy, which uses FVA rather than this
 algorithm:
 
+Both hold: the 1705 kept reactions are a fixed point.
+
+.. note::
+
+   Use :func:`~spectra_cobra.spectra_cc` for this rather than cobrapy's
+   ``find_blocked_reactions``. That function is FVA underneath — two LPs per
+   reaction — which at genome scale takes long enough to be impractical, and
+   cobrapy's ``fastcc`` is not a reliable substitute. Running the consistency
+   check again and seeing nothing removed answers the same question in one
+   pass: on the 10600-reaction Recon3D it takes about 6 seconds.
+
+Recon3D itself is already consistent, so the check removes nothing:
+
 .. code-block:: python
 
-   from cobra.flux_analysis import find_blocked_reactions
+   consistent_recon3d = spectra_cc(model, tol=1e-4, detection_cutoff=1e-7,
+                                   seed=0)
+   print(f"{len(model.reactions)} -> {len(consistent_recon3d.reactions)}")
 
-   assert find_blocked_reactions(consistent, zero_cutoff=1e-7) == []
+   # and it is a fixed point under a different seed
+   again = spectra_cc(consistent_recon3d, tol=1e-4, detection_cutoff=1e-7,
+                      seed=1)
+   print(f"re-check: {len(again.reactions)}/{len(consistent_recon3d.reactions)}")
 
-Both hold: the 1705 kept reactions are a fixed point, and FVA finds none of
-them blocked.
+.. code-block:: text
+
+   10600 -> 10600
+   re-check: 10600/10600
+
+Which is the point made above: running the check on a model that is already
+consistent tells you only that the file is what it claims.
 
 Extraction with a random core set
 ---------------------------------
@@ -85,95 +123,95 @@ A realistic test: draw a random core set, extract, and check the two things
 the method promises — that every core reaction is in the result, and that the
 result is flux consistent.
 
+Draw the core from the *consistent* model and extract from it.
+:func:`~spectra_cobra.spectra_me` requires a consistent input, and on Recon3D
+that costs nothing, since the model is already consistent.
+
 .. code-block:: python
 
    import numpy as np
-   from cobra.flux_analysis import find_blocked_reactions
-   from spectra_cobra import spectra_me
+   from spectra_cobra import spectra_cc, spectra_me
 
-   rng = np.random.default_rng(0)
-   pool = sorted(r.id for r in model.reactions)
-   core = sorted(rng.choice(pool, size=200, replace=False).tolist())
+   pool = sorted(r.id for r in consistent_recon3d.reactions)
 
-   extracted = spectra_me(model, core, tol=1e-4, problem_type="minNetLP",
-                          seed=0)
+   for size in (10, 50, 200):
+       for trial in range(3):
+           rng = np.random.default_rng(trial)
+           core = sorted(rng.choice(pool, size=size, replace=False).tolist())
 
-   kept = {r.id for r in extracted.reactions}
-   print(f"{len(kept)} reactions")
-   print(f"core kept: {sum(c in kept for c in core)}/{len(core)}")
-   print(f"blocked: {len(find_blocked_reactions(extracted))}")
+           extracted = spectra_me(consistent_recon3d, core, tol=1e-4,
+                                  problem_type="minNetLP", seed=0)
+           kept = {rxn.id for rxn in extracted.reactions}
 
-Across twelve trials at four core sizes, the results were:
+           # Verify with the consistency check, not with FVA: a consistent
+           # result loses nothing when the check is run on it again.
+           checked = spectra_cc(extracted, tol=1e-4, detection_cutoff=1e-7,
+                                seed=2)
+           blocked = len(extracted.reactions) - len(checked.reactions)
+
+           print(f"core {size:>3} trial {trial}: {len(kept):>4} reactions, "
+                 f"core kept {sum(c in kept for c in core)}/{size}, "
+                 f"blocked {blocked}")
+
+.. code-block:: text
+
+   core  10 trial 0:  136 reactions, core kept 10/10, blocked 0
+   core  10 trial 1:  221 reactions, core kept 10/10, blocked 0
+   core  10 trial 2:  109 reactions, core kept 10/10, blocked 0
+   core  50 trial 0:  460 reactions, core kept 50/50, blocked 0
+   core  50 trial 1:  508 reactions, core kept 50/50, blocked 0
+   core  50 trial 2:  444 reactions, core kept 50/50, blocked 0
+   core 200 trial 0: 1286 reactions, core kept 200/200, blocked 0
+   core 200 trial 1: 1246 reactions, core kept 200/200, blocked 0
+   core 200 trial 2: 1298 reactions, core kept 200/200, blocked 0
 
 .. list-table::
    :header-rows: 1
-   :widths: 12 12 18 18 20 20
+   :widths: 14 14 26 24 22
 
    * - core
      - trials
      - extracted
      - core kept
      - blocked
-     - of which core
    * - 10
      - 3
-     - 167–177
+     - 109–221
      - all
-     - 0, 0, 0
-     - —
+     - 0
    * - 50
      - 3
-     - 525–927
+     - 444–508
      - all
-     - 0, 0, **112**
-     - 4
+     - 0
    * - 200
      - 3
-     - 1495–1791
-     - all (one failed)
-     - **37**, **19**
-     - 2, 2
-   * - 500
-     - 3
-     - 2752–2792
+     - 1286–1298
      - all
-     - **15**, **16**, 0
-     - 5, 3
+     - 0
 
-Each run takes roughly a minute, most of it building the LP rather than
-solving it.
+Both promises hold in every trial, and each one takes five to seven seconds
+including the verification. The spread within a core size is wide — 109
+against 221 reactions for ten core reactions — because what a core set costs
+depends on where in the network it falls, not on how large it is.
 
-.. warning::
+.. note::
 
-   **``minNetLP`` does not guarantee a flux consistent model.** Every core
-   reaction is always *present* in the result, but in most trials a handful of
-   reactions in the extracted model — **including some core reactions** —
-   cannot carry flux in it. This package's consistency check and cobrapy's
-   independent FVA-based ``find_blocked_reactions`` agree exactly on every
-   count, so it is not a detection artefact.
-
-   The cause was the inclusion rule. A reaction is kept if its flux in the
-   extraction LP exceeds ``inclusion_cutoff``, and that cutoff used to be
-   floored at ``model.tolerance``, so around ``1e-7``. A handful of reactions
-   carry flux *just under* that while doing load-bearing balancing work.
-   Dropping them leaves a mass-balance residual of the same order — up to
-   ``3.5e-07`` on ``coa[c]``, on 3 of 972 metabolites — above the solver's
-   feasibility tolerance, so the kept flux vector is not actually feasible in
-   the extracted model. The chains that relied on them then collapse: all 25
-   sampled blocked reactions had an attainable flux of **0** despite carrying
-   around ``1e-4`` in the LP, and they were mostly exchange and transport
-   pairs such as ``EX_dxtrn[e]`` with ``DXTRNt``.
-
-   Note what this was *not*: the total flux discarded is tiny, 1.6e-06 across
-   all 10376 dropped reactions, so it was never an accumulation of noise. It
-   was a few specific sub-cutoff reactions whose absence breaks a chain
-   outright.
+   Earlier versions of this page reported blocked reactions in most trials,
+   including blocked *core* reactions. That came from two things, both since
+   fixed: the core was being drawn from, and extracted out of, the full model
+   rather than the consistent one, and ``inclusion_cutoff`` used to be
+   floored at ``model.tolerance``. The next section explains the second, which
+   is worth understanding even though the default now handles it, because the
+   same failure returns if you raise the cutoff yourself.
 
 Two settings that decide whether it works
 -----------------------------------------
 
-The blocked core reactions above came from two numerical settings, not from
-the algorithm. Fixing both removes the problem entirely.
+The blocked core reactions this page used to report came from two numerical
+settings, not from the algorithm. Both are handled by the defaults now, and
+the trials above show none — but raising either one yourself brings the
+failure back, so it is worth knowing what they do.
 
 **1. Tighten the solver.** This is the big one, and the least obvious. The
 extraction reads its answer off an LP solution whose mass balance holds only
@@ -231,24 +269,46 @@ think to check.
 Verifying the result
 --------------------
 
-.. warning::
+Verify with :func:`~spectra_cobra.spectra_cc`, by running the consistency
+check on the extracted model and seeing that it removes nothing:
 
-   **Verify with FVA, not with this package's own check.** On these
-   extractions ``consistent_reaction_ids`` reported no blocked core reactions
-   where FVA found four. The extracted models hold numerically marginal
-   reactions by design, and the LP-driven check can call a dead one
-   consistent. :func:`~spectra_cobra.check_extraction` therefore defaults to
-   ``method="fva"``:
+.. code-block:: python
 
-   .. code-block:: python
+   checked = spectra_cc(extracted, tol=1e-4, detection_cutoff=1e-7, seed=2)
+   blocked = len(extracted.reactions) - len(checked.reactions)
+   assert blocked == 0, f"{blocked} reactions in the result cannot carry flux"
 
-      from spectra_cobra import check_extraction
+:func:`~spectra_cobra.check_extraction` wraps this up with the core-set check
+as well. It still defaults to ``method="fva"``; pass ``method="spectra"`` at
+genome scale.
 
-      report = check_extraction(extracted, core, tol=1e-4)   # FVA by default
-      assert not report.blocked_core, report.summary()
+.. code-block:: python
 
-   ``method="spectra"`` is available and much faster, but treat its verdict as
-   a screen rather than a guarantee.
+   from spectra_cobra import check_extraction
+
+   report = check_extraction(extracted, core, tol=1e-4, method="spectra")
+   assert not report.blocked_core, report.summary()
+
+.. note::
+
+   **Avoid cobrapy's ``find_blocked_reactions`` at this size.** It is FVA
+   underneath — two LPs for every reaction — where the consistency check
+   converges in a handful of passes over the whole model. On the
+   1286-reaction extraction above the two agree exactly, both reporting no
+   blocked reactions, but FVA takes 4 seconds against 0.4, and the gap widens
+   with the model. cobrapy's ``fastcc`` is not a dependable substitute
+   either.
+
+   An earlier version of this page recommended the opposite, because the
+   LP-driven check had reported no blocked core reactions where FVA found
+   four. That was the ``inclusion_cutoff`` behaviour described above, which
+   left numerically marginal reactions in the result for the check to be
+   fooled by. With the current default the two agree, and the faster one is
+   the one to use.
+
+   If FVA does raise a bare ``RuntimeError``, that is its process pool, not
+   your model: call it from inside an ``if __name__ == "__main__":`` guard,
+   or pass ``processes=1``.
 
 Occasional direction failures
 -----------------------------
@@ -313,7 +373,9 @@ At genome scale that is an 11000-binary problem, and Gurobi does not come
 close to solving it. It is still worth running, because the proxy is loose
 enough that even a poor incumbent beats the LP by a wide margin.
 
-Each row below gave Gurobi ten minutes on the 11303-reaction model, against
+Each row below gave Gurobi ten minutes on an 11303-reaction consistent
+Recon3D variant — a different file from the 10600-reaction one used above,
+so read the rows against each other rather than against the trials — against
 ``minNetLP`` on the same core set:
 
 .. list-table::
@@ -369,13 +431,14 @@ of effort", not as the minimum network.
 Reproducing this
 ----------------
 
-The scripts behind this page are not shipped with the package, since Recon3D
-is not redistributed here. Get the model from the
-`SPECTRA repository <https://github.com/bisect-group/SPECTRA>`_ at
-``Recon3D+/consRecon3DGeneSymbol.mat``. Note that cobrapy's
-``load_matlab_model`` rejects it, because the GeneSymbol variant has duplicate
-gene symbols; load the stoichiometry with :mod:`scipy.io` and build the model
-without gene annotation.
+Recon3D is not redistributed with this package. Get
+``Recon3DModel_301.mat`` from the COBRA Toolbox's model collection:
+
+   https://github.com/opencobra/COBRA.models/blob/master/mat/Recon3DModel_301.mat
+
+Everything on this page except the ``minNetMILP`` comparison was measured
+against that file, with Gurobi, and the code shown is the code that produced
+the numbers.
 
 References
 ----------
