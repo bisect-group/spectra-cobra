@@ -78,7 +78,7 @@ How the pool is built
 
 ``mode="shared"`` is what a community wants: the organisms share the external
 compartment itself. One row of the stoichiometric matrix per exchangeable
-metabolite, for the whole community, and no transport reactions at all.
+metabolite, for the whole community.
 
 .. graphviz::
    :caption: ``mode="shared"``. There is one ``glc[e]`` and both organisms
@@ -147,20 +147,52 @@ Reconstructions do not agree on how to write an extracellular metabolite.
 BiGG says ``glc__D_e``, VMH and AGORA say ``glc_D[e]``, Human-GEM says
 ``MAM01965e``. Two questions follow, and they have different answers.
 
-**Which compartment is the outside one?** Worked out per organism, by cobrapy's
-own heuristic: a compartment with a recognised name, else the one carrying
-the most boundary reactions. Per organism, not once for the community, because
-the organisms need not agree — one model may call it ``e`` and another
-``extracellular``. Override it when you need to:
+**Which compartment is the outside one?** This decides which metabolites can
+reach the pool at all. Everything in an organism's external compartment
+becomes exchangeable; everything else stays private to it. Point it at the
+wrong compartment and the organism either trades nothing or trades on its
+cytosol.
+
+It is worked out **per organism**, not once for the community, because the
+models need not agree: one may call it ``e``, another ``extracellular``, a
+third ``C_e``. The builder asks cobrapy's
+:func:`~cobra.medium.find_external_compartment` for each, which tries the
+following in order:
+
+1. **A compartment whose id is a recognised name** — ``e``, ``extracellular``,
+   ``external``, ``out``, ``e0``, ``C_e`` and a handful of variants. If
+   exactly one matches, it is used and nothing is counted.
+2. **Several recognised names** — whichever of them carries the most boundary
+   reactions wins, with a warning. If that still cannot separate them, it
+   gives up rather than guess.
+3. **No recognised name at all** — the compartment with the most boundary
+   reactions, with a warning that the answer "might be complete nonsense".
+4. **Neither names nor boundary reactions** — nothing to go on, and it gives
+   up.
+
+Where it gives up, the builder does not fail. It falls back to ``"e"`` and
+logs a warning naming the organism, so a model whose compartments are
+unusual can end up with an external compartment that does not exist and no
+exchangeable metabolites at all. Read the warnings.
+
+Step 1 is the only branch that is actually reliable. Steps 2 and 3 are
+counting heuristics on a quantity nothing guarantees, which is why both warn.
+
+Say it yourself when you have any doubt — a string for every organism, or a
+mapping for the ones that differ:
 
 .. code-block:: text
 
    build_community_model(..., external_compartment="ext")          # all organisms
    build_community_model(..., external_compartment={"A": "e", "B": "ext"})
 
-This step keys off ``met.compartment``, not off the identifier. A model
-whose metabolites carry no compartment at all — some ``.mat`` dumps — will
-have nothing recognised as external, so set them before you build.
+The mapping may be partial: organisms it does not name fall through to the
+heuristic, so you only have to spell out the awkward ones.
+
+This step keys off ``met.compartment``, not off the metabolite identifier. A
+model whose metabolites carry no compartment at all — some ``.mat`` dumps
+load this way — has nothing for any of the four branches to work with, so set
+``met.compartment`` before you build.
 
 **Which metabolites are the same compound?** Two organisms meet in the pool
 only if their metabolites resolve to the same name. By default the
