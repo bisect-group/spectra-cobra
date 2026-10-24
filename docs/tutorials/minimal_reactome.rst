@@ -216,10 +216,13 @@ A plain list works too and is labelled for you (``medium_0``, ``medium_1``,
 and ``production`` are then keyed by label, they are keyed by label in the
 single-medium case too, under the label ``"growth"``:
 
-.. code-block:: python
+.. code-block:: text
 
-   result.growth["growth"]          # one medium
-   result.growth["acetate"]         # several
+   result.growth["growth"]          # one medium, under the default label
+   result.growth["acetate"]         # several, under the labels you gave
+
+Both forms are shown together for comparison; only one of them applies to any
+given result, depending on how ``conditions`` was passed.
 
 How much growth to keep
 -----------------------

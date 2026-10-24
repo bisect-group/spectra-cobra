@@ -207,7 +207,7 @@ the most boundary reactions. Per unit, not once for the community, because
 the units need not agree — one model may call it ``e`` and another
 ``extracellular``. Override it when you need to:
 
-.. code-block:: python
+.. code-block:: text
 
    build_community_model(..., external_compartment="ext")          # all units
    build_community_model(..., external_compartment={"A": "e", "B": "ext"})
@@ -242,6 +242,8 @@ the thing it *is*:
    import re
    from cobra.io import load_matlab_model, load_model
 
+   # agora.mat stands in for any model of yours in the other namespace;
+   # substitute your own file here.
    bigg_model = load_model("textbook")              # spells it ``glc__D_e``
    agora_model = load_matlab_model("agora.mat")     # spells it ``glc_D[e]``
 
@@ -581,25 +583,48 @@ only ever meets ``tis2``:
 
 .. code-block:: python
 
+   from cobra.io import load_model
    from spectra_cobra import build_multi_tissue_model
 
    # The reference network, and the two sets of bounds the body is built with.
    # Substitute your own: ``pool_medium`` is what the blood offers, and
-   # ``link_bounds`` the per-tissue uptake rates you have measured.
+   # ``link_bounds`` what may cross between a tissue and a pool.
    gem = load_model("iJO1366")   # or Recon3D, converted -- see :doc:`recon3d`
-   blood_medium = {"glc_D_e": (-1.0, 1000.0), "o2_e": (-1000.0, 1000.0)}
-   measured_rates = {"tis1": {"glc_D_e": (-0.5, 1000.0)}}
+   blood_medium = {"glc__D_e": (-1.0, 1000.0), "o2_e": (-1000.0, 1000.0)}
+   measured_rates = {"glc__D_e": (-0.5, 1000.0)}
 
    body = build_multi_tissue_model(
        gem,
        tissues=["tis1", "tis2", "tis3"],
        pools={"Bl": ["tis1", "tis2"], "tis2_tis3": ["tis2", "tis3"]},
        environment=["Bl"],
-       anchor_reactions={t: "DM_atp_c_" for t in ("tis1", "tis2", "tis3")},
+       anchor_reactions={t: "ATPM" for t in ("tis1", "tis2", "tis3")},
        pool_medium=blood_medium,
        link_bounds=measured_rates,
        couple=False,
    )
+
+   print(f"{len(body.model.reactions)} reactions, "
+         f"{len(body.model.metabolites)} metabolites")
+   for name, units in body.pools.items():
+       print(f"  pool {name}: {list(units)}, "
+             f"{len(body.pool_metabolites[name])} metabolites")
+   print(f"  community exchanges: {len(body.community_exchanges)}")
+   transports = sum(r.id.startswith("TR_") for r in body.model.reactions)
+   print(f"  transports: {transports}")
+
+.. code-block:: text
+
+   8397 reactions, 6063 metabolites
+     pool Bl: ['tis1', 'tis2'], 324 metabolites
+     pool tis2_tis3: ['tis2', 'tis3'], 324 metabolites
+     community exchanges: 324
+     transports: 1296
+
+*E. coli* standing in for a tissue is biologically odd, but the structure is
+the point and it loads anywhere. 1296 is 324 x 2 for the blood plus 324 x 2
+for the interface; the 324 exchanges are all on ``Bl``, because that is the
+only pool nominated.
 
 Four things to notice.
 
@@ -642,19 +667,33 @@ reachable only through the third:
 4,400 is 880 × 3 for the blood plus 880 × 2 for the interface. The 880
 exchanges are all on ``Bl``, because that is the only pool nominated.
 
-The test that the topology is really doing something:
+The test that the topology is really doing something, on the *E. coli* body
+built above — where ``tis3`` is the tissue reachable only through ``tis2``:
+
+.. code-block:: python
+
+   body.model.objective = body.model.reactions.get_by_id("ATPM__tis3")
+   print(f"tis3 alone:               {body.model.slim_optimize():.4f}")
+
+   with body.model:
+       for rxn_id in body.reactions_of["tis2"]:
+           body.model.reactions.get_by_id(rxn_id).bounds = (0.0, 0.0)
+       print(f"tis3 with tis2 shut down: "
+             f"{body.model.slim_optimize(error_value=0.0):.4f}")
 
 .. code-block:: text
 
-   whole-body objective:       21.3061
-   tis4 alone:                 21.3061
-   tis4 with tis3 shut down:   0
+   tis3 alone:               17.2000
+   tis3 with tis2 shut down: 0.0000
 
-``tis4`` touches no open pool, so everything it eats comes through the
-interface from ``tis3``. Shut ``tis3`` down and ``tis4`` goes to exactly
+``tis3`` touches no open pool, so everything it eats comes through the
+interface from ``tis2``. Shut ``tis2`` down and ``tis3`` goes to exactly
 zero. Had the interface been given exchanges of its own — which is what
-defaulting ``environment`` to every pool would have done — ``tis4`` would
+defaulting ``environment`` to every pool would have done — ``tis3`` would
 have carried on regardless and nothing would have looked wrong.
+
+The Recon3D figures above show the same structure at genome scale, where
+``tis4`` stands in the position ``tis3`` holds here.
 
 Extracting context-specific tissues
 -----------------------------------
@@ -667,14 +706,29 @@ the union of each tissue's core reactions, tagged:
 
    from spectra_cobra import spectra_me
 
-   # ATP maintenance and a maintenance biomass reaction, in every tissue.
-   cores = {tissue: ["DM_atp_c_", "biomass_maintenance"]
-            for tissue in ("tis1", "tis2", "tis3", "tis4")}
-
-   core = [f"{rxn}__{tissue}" for tissue, rxns in cores.items() for rxn in rxns]
-   extracted = spectra_me(body.model, core, tol=1e-4, problem_type="minNetLP")
+   # ATP maintenance in every tissue. On a human reconstruction a maintenance
+   # biomass reaction would sit alongside it in each tissue's core.
+   core = [f"ATPM__{tissue}" for tissue in ("tis1", "tis2", "tis3")]
+   extracted = spectra_me(body.model, core, tol=1e-4, problem_type="minNetLP",
+                          seed=0)
 
    tissues = body.with_model(extracted).decompose()
+
+   print(f"{len(extracted.reactions)} reactions")
+   print("  " + "   ".join(f"{name} {len(model.reactions)}"
+                           for name, model in tissues.items()))
+   kept = {rxn.id for rxn in extracted.reactions}
+   print(f"  core kept: {sum(c in kept for c in core)}/{len(core)}")
+
+.. code-block:: text
+
+   113 reactions
+     tis1 35   tis2 39   tis3 35
+     core kept: 3/3
+
+``decompose`` splits the extracted body back into one model per tissue. The
+tissues differ because they reach different pools: ``tis2`` is on both the
+blood and the interface and carries the most.
 
 On the four-tissue body above, with ATP maintenance and a maintenance
 biomass reaction core in every tissue:
@@ -762,31 +816,50 @@ stain — bounded by its own draft wherever the two agree. The organisms share
 the extracellular compartment, constrained by the standard amino acid
 complete (SAAC) medium.
 
-.. code-block:: python
+.. note::
 
-The drafts are CarveMe reconstructions, the universals CarveMe's own, and
-the SAAC medium is tabulated as ``hCOM_community/SAACmedia.xlsx`` in the
-`SPECTRA repository <https://github.com/bisect-group/SPECTRA>`_:
+   This section needs the case study's inputs, which are not part of this
+   package. They are on the ``paper_codes`` branch of the `SPECTRA
+   repository <https://github.com/bisect-group/SPECTRA/tree/paper_codes>`_:
+
+   * ``hCOM_community/CommunityGapFilling/hComDraftModels/`` — 104 CarveMe
+     drafts, one per organism
+   * ``hCOM_community/CommunityGapFilling/Universal_models/`` — CarveMe's
+     universals, general (``carvemeModelConv``), Gram-positive (``GP``) and
+     Gram-negative (``GN``)
+   * ``hCOM_community/CommunityGapFilling/gram_stain.csv`` — the stain per
+     strain, as ``0``, ``+`` or ``-``
+   * ``hCOM_community/SAACmedia.xlsx`` — the medium
+
+   Paths below assume you are in ``hCOM_community/CommunityGapFilling``.
+
+The drafts are CarveMe reconstructions and the universals CarveMe's own,
+picked per organism by Gram stain — three of them, because a strain whose
+stain is unrecorded gets the general universal rather than a guess:
 
 .. code-block:: python
 
    from pathlib import Path
 
    import pandas as pd
-   from cobra.io import read_sbml_model
+   from cobra.io import load_matlab_model
 
-   # One CarveMe draft per organism, and CarveMe's own universals, picked
-   # per organism by Gram stain.
-   names = sorted(p.stem for p in Path("CarvemeDraftModels").glob("*.xml"))
-   drafts = [read_sbml_model(f"CarvemeDraftModels/{name}.xml") for name in names]
-   gram = dict(pd.read_csv("gram_stain.csv").itertuples(index=False))
-   universals = {stain: read_sbml_model(f"Universal_models/carveme_{stain}.xml")
-                 for stain in ("positive", "negative")}
-   universal_for = {name: universals[gram[name]] for name in names}
+   names = sorted(path.stem for path in Path("hComDraftModels").glob("*.mat"))
+   drafts = [load_matlab_model(f"hComDraftModels/{name}.mat") for name in names]
+
+   # '0' is "not recorded", and takes the general universal.
+   UNIVERSAL_FILE = {"0": "carvemeModelConv_with_biomass.mat",
+                     "+": "carvemeModelGPconv_with_biomass.mat",
+                     "-": "carvemeModelGNconv_with_biomass.mat"}
+   universals = {stain: load_matlab_model(f"Universal_models/{filename}")
+                 for stain, filename in UNIVERSAL_FILE.items()}
+
+   stains = pd.read_csv("gram_stain.csv").set_index("Strain")["stain"]
+   universal_for = {name: universals[stains[name]] for name in names}
 
    # The SAAC medium, as uptake bounds on the shared compartment.
    saac = {row.metabolite: (-row.uptake, 1000.0)
-           for row in pd.read_excel("SAACmedia.xlsx").itertuples()}
+           for row in pd.read_excel("../SAACmedia.xlsx").itertuples()}
 
 .. code-block:: python
 

@@ -25,8 +25,10 @@ Building a community
 --------------------
 
 The nine AGORA reconstructions used here are distributed with SPECTRA, in
-the ``MinimalMicrobiome/models/`` directory of the `SPECTRA repository
-<https://github.com/bisect-group/SPECTRA>`_:
+the ``MinimalMicrobiome/models/`` directory of the `paper_codes branch
+<https://github.com/bisect-group/SPECTRA/tree/paper_codes/MinimalMicrobiome>`_
+of the SPECTRA repository. Paths below assume you are in the directory that
+holds ``MinimalMicrobiome``:
 
 .. code-block:: python
 
@@ -76,6 +78,8 @@ are tab-separated ``EX_<metabolite>(e)``/bound pairs, published at
 
 .. code-block:: python
 
+   # sample_diet.txt is a diet of your own, in the AGORA format described
+   # above; the links give you one to start from.
    diet = {}
    with open("sample_diet.txt") as handle:
        for line in handle:
