@@ -155,6 +155,8 @@ one:
 
 .. code-block:: python
 
+   core = ["PGI", "PFK", "FBA"]
+
    a = spectra_me(consistent, core, tol=1e-3, seed=0)
    b = spectra_me(consistent, core, tol=1e-3, seed=0)
    assert {r.id for r in a.reactions} == {r.id for r in b.reactions}
@@ -163,6 +165,38 @@ Core identifiers are sorted before the LP is built, so each reaction keeps
 its own coefficient whatever ``PYTHONHASHSEED`` does to the iteration order
 of the core set. Without that, a seeded run reproduces only inside a single
 process. The solver is the remaining source of variation.
+
+Which formulation to extract with
+---------------------------------
+
+Everything above used the default, ``problem_type="minNetLP"``: one LP,
+minimising total absolute flux. ``"minNetMILP"`` asks the same question
+exactly rather than through a relaxation and so returns a smaller model --
+16 reactions against 27 for the core set used here -- but it is a
+mixed-integer solve, and that is where the cost lands.
+
+All four formulations keep every core reaction. The core is pinned by the
+directions settled in phase one, not by the objective, so the choice changes
+what is kept *around* the core and never whether the core survives. What it
+also changes is the meaning of a weight, which is the part most worth
+reading up on before switching: see :doc:`formulations`.
+
+The size of the model decides whether the exact answer is affordable. On the
+textbook model every formulation finishes in well under a tenth of a second
+and you may as well use ``minNetMILP``. On a genome-scale model it does not
+finish at all without a ``time_limit`` -- see :doc:`recon3d`, where it is
+given ten minutes against an LP that takes seconds.
+
+A useful rule, then, is to let the number of models decide:
+
+* **Many models from one universal model** -- a context-specific model per
+  cell in a single-cell dataset, per sample, or per condition -- favours the
+  **LP formulations**. A per-model cost that is tolerable once becomes the
+  whole runtime when it is paid thousands of times, and a slightly larger
+  model is rarely what limits that kind of analysis.
+* **One model you intend to study closely** favours **minNetMILP**, with a
+  ``time_limit`` set if the model is large. Here the size of the result is
+  the result, and the minutes are paid once.
 
 Next
 ----

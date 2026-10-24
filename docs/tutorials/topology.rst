@@ -22,34 +22,6 @@ A network the steady state rejects
 This is figure 2a of the Meneco article, and the toy model SPECTRA's own
 experiment uses. Note the coefficient ``n``:
 
-.. code-block:: python
-
-   from cobra import Model, Reaction
-   from spectra_cobra import consistent_reaction_ids
-
-
-   def topology_toy_model(n):
-       model = Model(f"topology n={n}")
-       ids = [f"r{i}" for i in range(1, 7)]
-       model.add_reactions([Reaction(i) for i in ids])
-       formulas = ["--> S", f"S --> b + {n} a", "b + a --> d",
-                   "a --> c", "d + c --> T1", "T1 -->"]
-       for rxn_id, formula in zip(ids, formulas):
-           rxn = model.reactions.get_by_id(rxn_id)
-           rxn.reaction = formula
-           rxn.bounds = (0.0, 1000.0)
-       return model
-
-
-   for n in (1, 2, 3):
-       model = topology_toy_model(n)
-       steady, _ = consistent_reaction_ids(model, tol=1e-4,
-                                           consistency_type="stoichiometry")
-       accumulating, _ = consistent_reaction_ids(model, tol=1e-4,
-                                                 consistency_type="topology")
-       print(f"n={n}: stoichiometry {len(steady)}/6, topology "
-             f"{len(accumulating)}/6")
-
 .. graphviz::
    :caption: ``topology_toy_model(n)``. Boxes are reactions, ovals are
              metabolites. Everything is irreversible, and only ``r2``
@@ -89,6 +61,34 @@ experiment uses. Note the coefficient ``n``:
      T1 -> r6;
      r6 -> sink [style=dashed, color="#c9ced6"];
    }
+
+.. code-block:: python
+
+   from cobra import Model, Reaction
+   from spectra_cobra import consistent_reaction_ids
+
+
+   def topology_toy_model(n):
+       model = Model(f"topology n={n}")
+       ids = [f"r{i}" for i in range(1, 7)]
+       model.add_reactions([Reaction(i) for i in ids])
+       formulas = ["--> S", f"S --> b + {n} a", "b + a --> d",
+                   "a --> c", "d + c --> T1", "T1 -->"]
+       for rxn_id, formula in zip(ids, formulas):
+           rxn = model.reactions.get_by_id(rxn_id)
+           rxn.reaction = formula
+           rxn.bounds = (0.0, 1000.0)
+       return model
+
+
+   for n in (1, 2, 3):
+       model = topology_toy_model(n)
+       steady, _ = consistent_reaction_ids(model, tol=1e-4,
+                                           consistency_type="stoichiometry")
+       accumulating, _ = consistent_reaction_ids(model, tol=1e-4,
+                                                 consistency_type="topology")
+       print(f"n={n}: stoichiometry {len(steady)}/6, topology "
+             f"{len(accumulating)}/6")
 
 .. code-block:: text
 

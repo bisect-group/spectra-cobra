@@ -62,17 +62,48 @@ On the textbook model, across nine carbon sources:
            model.reactions.get_by_id(ex_id).lower_bound = -1000.0
        model.reactions.get_by_id(carbon).lower_bound = -uptake
 
-   # The media the universal model actually grows in -- all nine, here.
+   # Check the universal model first: it can only grow where it already can.
    usable = []
    for carbon in CARBON:
        with universal:
            medium(universal, carbon)
-           if universal.slim_optimize(error_value=0.0) > 1e-6:
+           growth = universal.slim_optimize(error_value=0.0)
+           if growth > 1e-6:
                usable.append(carbon)
+           print(f"{carbon:<16} {growth:.4f}")
+   print(f"usable: {len(usable)}/{len(CARBON)}")
+
+.. code-block:: text
+
+   EX_glc__D_e      0.8739
+   EX_ac_e          0.1733
+   EX_succ_e        0.3976
+   EX_mal__L_e      0.3707
+   EX_fum_e         0.3707
+   EX_pyr_e         0.2912
+   EX_akg_e         0.5288
+   EX_gln__L_e      0.5593
+   EX_glu__L_e      0.5987
+   usable: 9/9
 
 Closing everything first matters: a medium is defined by what it *lacks* as
 much as by what it supplies, and a model's default bounds usually leave far
 more open than you intend.
+
+.. important::
+
+   **Check that the universal model grows in a medium before gap-filling
+   towards it.** Gap-filling can only add reactions the universal model has;
+   if it cannot grow in a medium itself, no subset of it will either, and
+   that medium becomes a permanent failure in your results with nothing to
+   be done about it.
+
+   All nine pass here, so ``usable`` is the whole panel. On a real universal
+   model it rarely is, and the ones that drop out are telling you something
+   before you spend a single mixed-integer solve: either the medium is
+   misspecified -- a missing salt, an exchange named differently than you
+   assumed -- or the universal model genuinely lacks that capability and
+   needs extending before it can serve as a source of reactions.
 
 **Reactions essential for growth**, by single deletion in each medium:
 
@@ -84,15 +115,23 @@ more open than you intend.
            medium(universal, carbon)
            result = single_reaction_deletion(universal, processes=1)
        ids = [next(iter(s)) for s in result["ids"]]
-       essential |= {i for i, g in zip(ids, result["growth"].to_numpy())
-                     if np.isnan(g) or g < 0.01}
+       this_medium = {i for i, g in zip(ids, result["growth"].to_numpy())
+                      if np.isnan(g) or g < 0.01}
+       essential |= this_medium
+       print(f"{carbon:<16} {len(this_medium):>3} essential")
+   print(f"union: {len(essential)}")
 
 .. code-block:: text
 
-   EX_glc__D_e      18 essential
-   EX_ac_e          37 essential
-   EX_succ_e        30 essential
-   ...
+   EX_glc__D_e       18 essential
+   EX_ac_e           37 essential
+   EX_succ_e         30 essential
+   EX_mal__L_e       28 essential
+   EX_fum_e          29 essential
+   EX_pyr_e          27 essential
+   EX_akg_e          24 essential
+   EX_gln__L_e       25 essential
+   EX_glu__L_e       26 essential
    union: 54
 
 Acetate needs twice as many reactions as glucose, because growing on a
@@ -109,9 +148,16 @@ is the reason to gap-fill against a panel rather than a single condition.
                           remove_orphans=False)
    draft_ids = {rxn.id for rxn in draft.reactions}
 
+   cannot = 0
+   for carbon in usable:
+       with draft:
+           medium(draft, carbon)
+           if draft.slim_optimize(error_value=0.0) <= 1e-6:
+               cannot += 1
+   print(f"media the draft cannot grow in: {cannot}/{len(usable)}")
+
 .. code-block:: text
 
-   removed ['ENO', 'ACONTb', 'SUCDi', 'NH4t']
    media the draft cannot grow in: 9/9
 
 **Gap-fill**, medium by medium, letting the draft, the essential reactions,
@@ -129,7 +175,11 @@ the exchanges and anything already added be free:
                       for rxn in universal.reactions}
            filled = spectra_me(universal, [BIOMASS], tol=0.1, weights=weights,
                                problem_type="minNetMILP", seed=0)
-       added |= {rxn.id for rxn in filled.reactions} - draft_ids - added
+       new = {rxn.id for rxn in filled.reactions} - draft_ids - added
+       if new:
+           print(f"{carbon:<16} added {sorted(new)}")
+       added |= new
+   print(f"added in total: {sorted(added)}")
 
    # The gap-filled model is the draft plus the additions.
    gapfilled = universal.copy()
@@ -137,10 +187,17 @@ the exchanges and anything already added be free:
        sorted({rxn.id for rxn in universal.reactions} - draft_ids - added),
        remove_orphans=False)
 
+   grows = 0
+   for carbon in usable:
+       with gapfilled:
+           medium(gapfilled, carbon)
+           if gapfilled.slim_optimize(error_value=0.0) > 1e-6:
+               grows += 1
+   print(f"grows in {grows}/{len(usable)} media")
+
 .. code-block:: text
 
    EX_glc__D_e      added ['ACONTb', 'ENO', 'NH4t', 'SUCDi']
-
    added in total: ['ACONTb', 'ENO', 'NH4t', 'SUCDi']
    grows in 9/9 media
 
@@ -154,6 +211,42 @@ medium does most of the work and the rest confirm it, which is why
    Adding to ``free`` as you go is what keeps the result small. Without it
    each medium prices the previous medium's additions all over again, and
    the union grows with reactions that duplicate work already paid for.
+
+Doing it in one call
+--------------------
+
+The loop above is spelled out because the decisions in it are the subject of
+this page. :func:`~spectra_cobra.gapfill_for_growth` makes the same
+decisions for you:
+
+.. code-block:: python
+
+   from spectra_cobra import gapfill_for_growth
+
+   media = {}
+   for carbon in usable:
+       spec = {ex: -1000.0 for ex in SALTS}
+       spec[carbon] = -10.0
+       media[carbon] = spec
+
+   result = gapfill_for_growth(draft, universal, media, min_growth=0.1,
+                               objective_reaction=BIOMASS, tol=0.1, seed=0)
+
+   print(f"added:       {sorted(result.added)}")
+   print(f"satisfied:   {len(result.satisfied)} media")
+   print(f"unsatisfied: {sorted(result.unsatisfied)}")
+
+.. code-block:: text
+
+   added:       ['ACONTb', 'ENO', 'NH4t', 'SUCDi']
+   satisfied:   9 media
+   unsatisfied: []
+
+The same four reactions. A medium here is a mapping of exchange identifier to
+lower bound, and ``min_growth`` is the growth each medium must reach -- a
+bound on biomass, not a tolerance, which is the distinction the next section
+but one is about. Reach for the loop when you want to vary something it does
+not expose; otherwise this is the same computation with less to get wrong.
 
 Why the essential reactions are free, not core
 ----------------------------------------------

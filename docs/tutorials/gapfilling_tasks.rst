@@ -22,11 +22,8 @@ For each task, find the reactions without which it becomes infeasible. Their
 union is a set of reactions the model must contain, and *that* is something
 :func:`~spectra_cobra.spectra_me` already enforces: it is a core set.
 
-.. code-block:: python
-
-   from spectra_cobra import essential_reactions_for_tasks
-
-   core, per_task = essential_reactions_for_tasks(universal, tasks)
+That is what :func:`~spectra_cobra.essential_reactions_for_tasks` returns, and
+the worked example below runs it on a real model and task list.
 
 .. warning::
 
@@ -148,6 +145,14 @@ help, and it will sit in your results as a permanent failure.
 
 Now the essential reactions:
 
+.. code-block:: python
+
+   core, per_task = essential_reactions_for_tasks(universal, tasks)
+
+   for task_id, reactions in sorted(per_task.items()):
+       print(f"{task_id:<16} {len(reactions):>2} essential")
+   print(f"union (the core set): {len(core)}")
+
 .. code-block:: text
 
    atp_aerobic       1 essential
@@ -159,7 +164,7 @@ Aerobic ATP production has exactly one essential reaction, because almost
 every step of it has an alternative; anaerobic ATP has twelve, because
 fermentation is a narrow path. That spread is the warning above, in numbers.
 
-Knock four reactions out to make a draft, and all three tasks break:
+Knock four reactions out to make a draft:
 
 .. code-block:: python
 
@@ -167,50 +172,95 @@ Knock four reactions out to make a draft, and all three tasks break:
    draft.remove_reactions(["CYTBD", "ACALD", "GLUSy", "AKGDH"],
                           remove_orphans=False)
 
+   failing = [result.task.id for result in check_tasks(draft, tasks)
+              if not result.ok]
+   print(f"tasks the draft fails: {failing}")
+
 .. code-block:: text
 
-   tasks the draft fails: ['atp_aerobic', 'atp_anaerobic', 'make_glutamate']
+   tasks the draft fails: ['atp_anaerobic', 'make_glutamate']
 
-Gap-fill by extracting around the core, rewarding the reactions the draft
-already has and charging for everything else:
+Two of the three break, not all three. ``atp_aerobic`` survives, because its
+one essential reaction was not among the four removed and the rest of aerobic
+ATP production has alternatives to spare. That is the warning above happening
+in practice: the essential set is a necessary condition, and a task with
+alternative routes contributes few essential reactions, or none.
+
+Gap-filling
+-----------
+
+:func:`~spectra_cobra.gapfill_for_tasks` does the whole thing: find the
+essential reactions, extract around them, and apply the additions on top of
+the draft.
 
 .. code-block:: python
 
-   draft_ids = {rxn.id for rxn in draft.reactions}
-   weights = {rxn.id: (1.0 if rxn.id in draft_ids else -1.0)
-              for rxn in universal.reactions}
+   from spectra_cobra import gapfill_for_tasks
 
-   filled = spectra_me(universal, sorted(core), tol=1e-3, weights=weights,
-                       problem_type="tradeOff", seed=0)
+   result = gapfill_for_tasks(draft, universal, tasks, tol=1e-3, seed=0)
 
-   # The extraction returns a minimal network around the core. The gap-filled
-   # model is that network unioned with the draft: the point is to add to the
-   # draft, not to replace it.
-   added = {rxn.id for rxn in filled.reactions} - draft_ids
-
-   # The gap-filled model is the draft plus those additions.
-   gapfilled = universal.copy()
-   gapfilled.remove_reactions(
-       sorted({rxn.id for rxn in universal.reactions} - draft_ids - added),
-       remove_orphans=False)
-   present = {rxn.id for rxn in gapfilled.reactions}
+   print(f"added:       {sorted(result.added)}")
+   print(f"satisfied:   {sorted(result.satisfied)}")
+   print(f"unsatisfied: {sorted(result.unsatisfied)}")
 
 .. code-block:: text
 
-   added back: ['ACALD', 'CYTBD']
-   tasks failing now: []
+   added:       ['ACALD']
+   satisfied:   ['atp_aerobic', 'atp_anaerobic', 'make_glutamate']
+   unsatisfied: []
 
-Two of the four removed reactions were enough. ``GLUSy`` and ``AKGDH`` were
-not put back because the network has other ways to make glutamate and to run
-the TCA cycle, which is the point of gap-filling towards tasks rather than
-towards a particular reaction list.
+One reaction was enough. ``CYTBD``, ``GLUSy`` and ``AKGDH`` were not put back,
+because the network has other ways to respire, to make glutamate and to run
+the TCA cycle. That is the point of gap-filling towards tasks rather than
+towards a reaction list: it restores the *ability*, not the reactions you
+happened to delete.
+
+The result carries the model as well as the account, so you can check it
+independently rather than taking ``satisfied`` on trust:
+
+.. code-block:: python
+
+   still_failing = [r.task.id for r in check_tasks(result.model, tasks)
+                    if not r.ok]
+   print(f"tasks failing now: {still_failing}")
+   print(f"{len(result.model.reactions)} reactions, draft had {len(draft.reactions)}")
+
+.. code-block:: text
+
+   tasks failing now: []
+   92 reactions, draft had 91
+
+Arguments worth knowing
+-----------------------
+
+``problem_type``
+   ``"minNetMILP"`` by default here, unlike :func:`~spectra_cobra.spectra_me`.
+   Gap-filling is usually run once on one draft, and the exact answer is
+   worth the mixed-integer solve. Pass ``"minNetLP"`` if it is too slow.
+
+``repair``
+   Whether to re-check the tasks afterwards and add what is still missing
+   (default True). The core set is a necessary condition, not a sufficient
+   one, so an extraction around it can leave a task unsatisfied; repair is
+   what closes that gap. It costs one task check plus, if anything is still
+   failing, a second solve. On this example it changes nothing -- the core
+   set was sufficient -- but it is what makes the ``satisfied`` list
+   trustworthy in general.
+
+``essential_reactions``
+   Pass a core set you have already computed, to avoid paying for it twice.
+
+``free_reactions``
+   Reactions to charge nothing for. The draft's own reactions are free
+   already; this is for anything else you want the extraction not to count.
 
 .. important::
 
-   The union with the draft is not optional. :func:`~spectra_cobra.spectra_me`
-   is an *extraction*: on its own it returns a minimal network around the core
-   and discards everything else, including most of your draft. Gap-filling is
-   the extraction's additions applied **on top of** the draft.
+   :func:`~spectra_cobra.spectra_me` on its own is an *extraction*: it returns
+   a minimal network around the core and discards everything else, including
+   most of your draft. Gap-filling is the extraction's additions applied **on
+   top of** the draft, and :func:`~spectra_cobra.gapfill_for_tasks` is what
+   does that union for you. Doing it by hand is easy to get subtly wrong.
 
 At genome scale
 ---------------
@@ -278,36 +328,64 @@ which were essential to some task:
      - 6
      - —
    * - ``tradeOff``
-     - 2477
-     - 44
+     - 2542
+     - 109
      - **0**
-     - 3.2 s
-   * - ``minNetMILP``
-     - 2448
-     - 15
-     - 1
-     - 2.2 s
-   * - ``minNetMILP`` + repair
+     - 7.7 s
+   * - ``minNetMILP``, ``repair=False``
      - 2449
      - 16
+     - 1
+     - 6.4 s
+   * - ``minNetMILP`` + ``repair``
+     - 2450
+     - 17
      - **0**
-     - +1 solve
+     - 7.8 s
 
 Checking the tasks took 0.4 s and finding the 95 essential reactions 5.1 s,
 so the whole preparation is cheaper than a single genome-scale MILP.
 
+Two of the 23 tasks are skipped rather than attempted: ``make_cys__L`` and
+``make_met__L`` are infeasible on iJO1366 itself, so no gap-fill could help
+them. The last section of this page explains why.
+
 Which objective?
 ----------------
 
-The two rows above differ by a factor of three in what they add, and the
+Those three rows are one function call each, differing only in arguments:
+
+.. code-block:: python
+
+   from spectra_cobra import gapfill_for_tasks
+
+   runs = {
+       "tradeOff": dict(problem_type="tradeOff"),
+       "minNetMILP, repair=False": dict(problem_type="minNetMILP", repair=False),
+       "minNetMILP + repair": dict(problem_type="minNetMILP", repair=True),
+   }
+
+   for name, options in runs.items():
+       result = gapfill_for_tasks(draft, universal, tasks, **options)
+       print(f"{name:<26} {len(result.model.reactions):>5} reactions, "
+             f"{len(result.added):>4} added, "
+             f"{len(result.unsatisfied)} failing")
+
+.. code-block:: text
+
+   tradeOff                    2542 reactions,  109 added, 0 failing
+   minNetMILP, repair=False    2449 reactions,   16 added, 1 failing
+   minNetMILP + repair         2450 reactions,   17 added, 0 failing
+
+The first two differ by a factor of seven in what they add, and the
 difference is instructive rather than a matter of taste.
 
-``minNetMILP`` adds the minimum: 15 reactions, essentially just the deleted
+``minNetMILP`` adds the minimum: 16 reactions, essentially just the deleted
 essential ones. One task — using acetate as a carbon source — still fails,
 because it has alternative routes and therefore contributed nothing to the
 core set. This is the warning at the top of the page, happening.
 
-``tradeOff`` adds 44 and fixes everything, but not because it understood the
+``tradeOff`` adds 109 and fixes everything, but not because it understood the
 problem better. Signed weights make it *reward* including draft reactions, so
 it builds a larger active network, and the extra reactions happen to restore
 the acetate route. That is luck, and on another draft it would not be.
@@ -318,30 +396,14 @@ is a set of metabolic reactions. Make biomass the core instead and
 reaction to carry at least ``tol`` and growth needs trace fluxes far below
 that. :doc:`gapfilling_media` has the measurement.
 
-So prefer ``minNetMILP`` and then repair what is left:
-
-.. code-block:: python
-
-   from spectra_cobra.formulations import min_net_milp
-   from spectra_cobra.tasks import task_constraints
-
-   for result in check_tasks(gapfilled, tasks):
-       if result.ok:
-           continue
-       # Inside the task's own constraints the model is already forced to
-       # perform it, so minimising the count of reactions that are not
-       # already present gives the cheapest repair directly.
-       with task_constraints(universal, result.task) as constrained:
-           weights = {rxn.id: (0.0 if rxn.id in present else 1.0)
-                      for rxn in constrained.reactions}
-           solution = min_net_milp(constrained, {}, weights,
-                                   1e-4, True, 300.0, None)
-           added |= set(solution.included) - present
-
-On the run above that added **one** reaction and brought the failures to
-zero, for a final model of 2449 reactions against ``tradeOff``'s 2477.
-Minimise, then repair what the core could not express: 28 reactions smaller,
-and correct for a reason rather than by accident.
+``repair`` is what closes the gap the core set could not express. It re-checks
+the tasks after the extraction and, for any still failing, solves once more
+inside that task's own constraints — where the model is already forced to
+perform it, so minimising the reactions not already present gives the
+cheapest repair directly. Here it cost one extra reaction and one extra
+solve, and took the failures to zero: 2450 reactions against ``tradeOff``'s
+2542. Minimise, then repair what the core could not express — 92 reactions
+smaller, and correct for a reason rather than by accident.
 
 Validate the task list first
 ----------------------------

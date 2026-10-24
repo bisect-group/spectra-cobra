@@ -25,7 +25,8 @@ At a glance
    # 1. Drop the blocked reactions.
    consistent = spectra_cc(model, tol=1e-3)
 
-   # 2. Extract a model around the reactions you care about.
+   # 2. Extract a model around the reactions you care about, so that they
+   #    can all carry flux at once.
    extracted = spectra_me(consistent, core_reactions=["PGI", "PFK", "FBA"],
                           tol=1e-3)
 
