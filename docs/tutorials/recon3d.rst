@@ -279,15 +279,17 @@ check on the extracted model and seeing that it removes nothing:
    assert blocked == 0, f"{blocked} reactions in the result cannot carry flux"
 
 :func:`~spectra_cobra.check_extraction` wraps this up with the core-set check
-as well. It still defaults to ``method="fva"``; pass ``method="spectra"`` at
-genome scale.
+as well, and uses the consistency check by default:
 
 .. code-block:: python
 
    from spectra_cobra import check_extraction
 
-   report = check_extraction(extracted, core, tol=1e-4, method="spectra")
+   report = check_extraction(extracted, core, tol=1e-4)
    assert not report.blocked_core, report.summary()
+
+Pass ``method="fva"`` for an independent second opinion, which is worth
+taking on a small model or if you have raised ``inclusion_cutoff`` yourself.
 
 .. note::
 
