@@ -217,36 +217,93 @@ Doing it in one call
 
 The loop above is spelled out because the decisions in it are the subject of
 this page. :func:`~spectra_cobra.gapfill_for_growth` makes the same
-decisions for you:
+decisions for you. Here is the whole process end to end, so you can run this
+section on its own:
 
 .. code-block:: python
 
+   import numpy as np
+   from cobra.flux_analysis import single_reaction_deletion
+   from cobra.io import load_model
    from spectra_cobra import gapfill_for_growth
 
+   universal = load_model("textbook")
+   BIOMASS = "Biomass_Ecoli_core"
+   SALTS = ["EX_pi_e", "EX_h2o_e", "EX_h_e", "EX_nh4_e", "EX_o2_e", "EX_co2_e"]
+   CARBON = ["EX_glc__D_e", "EX_ac_e", "EX_succ_e", "EX_mal__L_e", "EX_fum_e",
+             "EX_pyr_e", "EX_akg_e", "EX_gln__L_e", "EX_glu__L_e"]
+
+   def medium(model, carbon, uptake=10.0):
+       """Close every exchange, then open the salts and one carbon source."""
+       for reaction in model.boundary:
+           reaction.lower_bound = 0.0
+       for ex_id in SALTS:
+           model.reactions.get_by_id(ex_id).lower_bound = -1000.0
+       model.reactions.get_by_id(carbon).lower_bound = -uptake
+
+   # 1. Only gap-fill towards media the universal model can grow in.
+   usable = []
+   for carbon in CARBON:
+       with universal:
+           medium(universal, carbon)
+           if universal.slim_optimize(error_value=0.0) > 1e-6:
+               usable.append(carbon)
+
+   # 2. The reactions growth is known to need, in any of those media.
+   essential = set()
+   for carbon in usable:
+       with universal:
+           medium(universal, carbon)
+           result = single_reaction_deletion(universal, processes=1)
+       ids = [next(iter(s)) for s in result["ids"]]
+       essential |= {i for i, g in zip(ids, result["growth"].to_numpy())
+                     if np.isnan(g) or g < 0.01}
+
+   # 3. The draft with its holes.
+   draft = universal.copy()
+   draft.remove_reactions(["ENO", "ACONTb", "SUCDi", "NH4t"],
+                          remove_orphans=False)
+
+   # 4. Each medium as a mapping of exchange identifier to lower bound.
    media = {}
    for carbon in usable:
        spec = {ex: -1000.0 for ex in SALTS}
        spec[carbon] = -10.0
        media[carbon] = spec
 
+   # 5. Gap-fill, charging nothing for the essential reactions.
    result = gapfill_for_growth(draft, universal, media, min_growth=0.1,
-                               objective_reaction=BIOMASS, tol=0.1, seed=0)
+                               objective_reaction=BIOMASS, tol=0.1,
+                               free_reactions=sorted(essential), seed=0)
 
+   print(f"essential:   {len(essential)} reactions")
    print(f"added:       {sorted(result.added)}")
    print(f"satisfied:   {len(result.satisfied)} media")
    print(f"unsatisfied: {sorted(result.unsatisfied)}")
 
 .. code-block:: text
 
+   essential:   54 reactions
    added:       ['ACONTb', 'ENO', 'NH4t', 'SUCDi']
    satisfied:   9 media
    unsatisfied: []
 
-The same four reactions. A medium here is a mapping of exchange identifier to
-lower bound, and ``min_growth`` is the growth each medium must reach -- a
-bound on biomass, not a tolerance, which is the distinction the next section
-but one is about. Reach for the loop when you want to vary something it does
-not expose; otherwise this is the same computation with less to get wrong.
+The same four reactions the loop found. ``free_reactions`` is the one-call
+equivalent of the loop's ``free`` set: the draft's own reactions are free
+already, and this is how you add the essential ones to that. The draft's
+additions are carried between media for you.
+
+On this example the result is the same with ``free_reactions`` left out,
+because all four additions were forced by the glucose condition anyway. It
+earns its place on harder problems, where charging for a reaction growth is
+known to need pushes the solver onto a more expensive detour — the next
+section is about why those reactions are made free rather than core.
+
+A medium here is a mapping of exchange identifier to lower bound, and
+``min_growth`` is the growth each medium must reach — a bound on biomass,
+not a tolerance, which is the distinction two sections down. Reach for the
+loop when you want to vary something this does not expose; otherwise it is
+the same computation with less to get wrong.
 
 Why the essential reactions are free, not core
 ----------------------------------------------

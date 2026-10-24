@@ -1,35 +1,42 @@
 Microbial community models
 ==========================
 
-A microbial community and a multi-tissue body are the same construction.
-Several copies of a metabolic network sit side by side, each one tagged so
-its reactions cannot be confused with another's, and they meet somewhere
-they can pass metabolites to each other. What differs between a gut
-community and a human body is which copies meet where, and what the meeting
-place is called.
+A community is several organisms sharing an environment. Each one brings its
+own reconstruction — *Bacteroides* and *E. coli* are different organisms with
+different metabolism, and their models have different reactions, different
+metabolites and different gene associations. They are not copies of anything.
 
-This page builds a community from nothing on a toy, then gap-fills one at
-genome scale. :doc:`multi_tissue` is the same machinery pointed at tissues
-of a body, and takes the sections below as read — the pool, the tagging and
-the coupling work identically there.
+What a community model does is put those distinct networks side by side in
+one model, tag each one so its reactions cannot be confused with another's,
+and give them somewhere to pass metabolites to each other. One organism's
+secretion arrives there and becomes available to the rest, which is what
+makes cross-feeding possible and what makes the community more than the sum
+of its members.
 
-Units, pools and exchanges
---------------------------
+This page builds one from nothing on a toy, then gap-fills a 104-organism
+community at genome scale.
+
+Organisms, pools and exchanges
+------------------------------
 
 Three words carry the whole design.
 
-A **unit** is one copy of a network: an organism, or a tissue. Everything
-belonging to it gets its identifier as a suffix, so ``PFK`` in unit ``A``
-becomes ``PFK__A``. Units never share a reaction.
+An **organism** is one member's whole network. Everything belonging to it
+gets its identifier as a suffix, so ``PFK`` in organism ``A`` becomes
+``PFK__A``. Organisms never share a reaction, even where two of them carry
+the same one: *E. coli*'s ``PFK`` and *Bacteroides*' ``PFK`` are separate
+reactions with separate fluxes, because the two organisms run them
+independently.
 
-A **pool** is a compartment that several units can reach. It is the only
-way one unit's output becomes another's input. A community usually has a
-single pool; a body has several, because the liver and the gut meet the
-blood but the ovary and the granulosa cells also meet each other.
+A **pool** is a compartment that several organisms can reach. It is the only
+way one organism's output becomes another's input. A community usually has a
+single pool — the gut lumen, the medium everyone sits in — but it may have
+more, where some members are in contact with each other and not with the
+rest, such as a biofilm layer that only its neighbours reach.
 
 An **exchange** connects a pool to the environment outside the whole system.
 Only the pools you nominate get them. This is deliberate and it matters: a
-pool that exists purely to link two tissues must stay closed, or those two
+pool that exists purely to link two organisms must stay closed, or those two
 could dump metabolites straight out of the system and bypass everything
 else.
 
@@ -43,7 +50,7 @@ Every diagram on this page uses the same five shapes:
      node [fontname="Helvetica", fontsize=9.5];
      edge [style=invis];
 
-     met  [label="metabolite\nin a unit", shape=ellipse, style=filled,
+     met  [label="metabolite\nin an organism", shape=ellipse, style=filled,
            fillcolor="#e8f0fa", color="#3c6997", fontcolor="#1b3a57"];
      pool [label="pooled\nmetabolite", shape=ellipse, style=filled,
            fillcolor="#fdf0e3", color="#c07d2a", fontcolor="#6b4411",
@@ -54,31 +61,31 @@ Every diagram on this page uses the same five shapes:
      gone [label="reaction a\ndraft lacks", shape=box,
            style="filled,rounded,dashed", fillcolor="#fdf2ef", color="#b3411f",
            fontcolor="#b3411f", height=0.34];
-     unit [label="a unit", shape=box, style="rounded,filled",
+     organism [label="an organism", shape=box, style="rounded,filled",
            fillcolor="#f6f9fd", color="#c7d6e8", fontcolor="#3c6997",
            height=0.34];
 
-     met -> pool -> rxn -> gone -> unit;
+     met -> pool -> rxn -> gone -> organism;
    }
 
-Blue is private to a unit, orange is shared, and a dashed red outline marks
+Blue is private to an organism, orange is shared, and a dashed red outline marks
 something a draft does not have.
 
-Note what has to *go*: each unit's own exchange reactions are removed. A
+Note what has to *go*: each organism's own exchange reactions are removed. A
 draft model has ``EX_glc_e`` so it can eat; leave that in place and every
-unit feeds itself directly from the environment, the pool is decorative, and
+organism feeds itself directly from the environment, the pool is decorative, and
 nothing is a community at all.
 
 Two ways to build a pool
 ------------------------
 
-``mode="pooled"`` — each unit keeps a private external compartment, and a
+``mode="pooled"`` — each organism keeps a private external compartment, and a
 transport reaction carries each metabolite between it and the pool:
 
 .. graphviz::
-   :caption: ``mode="pooled"``. Each unit's own ``glc[e]`` is distinct, and
+   :caption: ``mode="pooled"``. Each organism's own ``glc[e]`` is distinct, and
              ``TR_`` reactions move glucose into the shared ``glc_u``. The
-             transports belong to a unit, so they can be bounded per unit.
+             transports belong to an organism, so they can be bounded per organism.
    :align: center
 
    digraph pooled {
@@ -87,7 +94,7 @@ transport reaction carries each metabolite between it and the pool:
      edge [fontname="Helvetica", fontsize=9, color="#6b7280", arrowsize=0.7];
 
      subgraph cluster_a {
-       label="unit A"; labeljust=l; fontname="Helvetica"; fontsize=9;
+       label="organism A"; labeljust=l; fontname="Helvetica"; fontsize=9;
        fontcolor="#3c6997"; color="#c7d6e8"; style="rounded,filled";
        fillcolor="#f6f9fd"; margin=10;
        glcA [label="glc[e]", shape=ellipse, style=filled, fillcolor="#e8f0fa",
@@ -98,7 +105,7 @@ transport reaction carries each metabolite between it and the pool:
        glcA -> trA [dir=both];
      }
      subgraph cluster_b {
-       label="unit B"; labeljust=l; fontname="Helvetica"; fontsize=9;
+       label="organism B"; labeljust=l; fontname="Helvetica"; fontsize=9;
        fontcolor="#3c6997"; color="#c7d6e8"; style="rounded,filled";
        fillcolor="#f6f9fd"; margin=10;
        glcB [label="glc[e]", shape=ellipse, style=filled, fillcolor="#e8f0fa",
@@ -123,15 +130,15 @@ transport reaction carries each metabolite between it and the pool:
      ex -> env [dir=both, style=dashed, color="#c9ced6"];
    }
 
-``mode="shared"`` — the units share the external compartment itself. One row
+``mode="shared"`` — the organisms share the external compartment itself. One row
 of the stoichiometric matrix per exchangeable metabolite, for the whole
 community, and no transports at all:
 
 .. graphviz::
-   :caption: ``mode="shared"``. There is one ``glc[e]`` and both units
-             reach it directly. Smaller, but with no transport between unit
+   :caption: ``mode="shared"``. There is one ``glc[e]`` and both organisms
+             reach it directly. Smaller, but with no transport between organism
              and pool there is nothing for ``link_bounds`` to attach a
-             per-unit uptake rate to.
+             per-organism uptake rate to.
    :align: center
 
    digraph shared {
@@ -140,7 +147,7 @@ community, and no transports at all:
      edge [fontname="Helvetica", fontsize=9, color="#6b7280", arrowsize=0.7];
 
      subgraph cluster_a {
-       label="unit A"; labeljust=l; fontname="Helvetica"; fontsize=9;
+       label="organism A"; labeljust=l; fontname="Helvetica"; fontsize=9;
        fontcolor="#3c6997"; color="#c7d6e8"; style="rounded,filled";
        fillcolor="#f6f9fd"; margin=10;
        upA [label="UP", shape=box, style="filled,rounded", width=0.7,
@@ -148,7 +155,7 @@ community, and no transports at all:
             fontcolor="#1b3a57"];
      }
      subgraph cluster_b {
-       label="unit B"; labeljust=l; fontname="Helvetica"; fontsize=9;
+       label="organism B"; labeljust=l; fontname="Helvetica"; fontsize=9;
        fontcolor="#3c6997"; color="#c7d6e8"; style="rounded,filled";
        fillcolor="#f6f9fd"; margin=10;
        upB [label="UP", shape=box, style="filled,rounded", width=0.7,
@@ -181,14 +188,14 @@ Which to use:
    * - pools
      - as many as you like
      - exactly one
-   * - per-unit bounds on what crosses
+   * - per-organism bounds on what crosses
      - yes, through ``link_bounds``
      - no reaction to bound
    * - size
-     - one transport per unit per metabolite
+     - one transport per organism per metabolite
      - nothing extra
    * - use it for
-     - tissues, measured uptake rates
+     - measured uptake and secretion rates
      - large communities
 
 The size difference is not cosmetic. A hundred organisms across a thousand
@@ -202,22 +209,22 @@ Reconstructions do not agree on how to write an extracellular metabolite.
 BiGG says ``glc__D_e``, VMH and AGORA say ``glc_D[e]``, Human-GEM says
 ``MAM01965e``. Two questions follow, and they have different answers.
 
-**Which compartment is the outside one?** Worked out per unit, by cobrapy's
+**Which compartment is the outside one?** Worked out per organism, by cobrapy's
 own heuristic: a compartment with a recognised name, else the one carrying
-the most boundary reactions. Per unit, not once for the community, because
-the units need not agree — one model may call it ``e`` and another
+the most boundary reactions. Per organism, not once for the community, because
+the organisms need not agree — one model may call it ``e`` and another
 ``extracellular``. Override it when you need to:
 
 .. code-block:: text
 
-   build_community_model(..., external_compartment="ext")          # all units
+   build_community_model(..., external_compartment="ext")          # all organisms
    build_community_model(..., external_compartment={"A": "e", "B": "ext"})
 
 This step keys off ``met.compartment``, not off the identifier. A model
 whose metabolites carry no compartment at all — some ``.mat`` dumps — will
 have nothing recognised as external, so set them before you build.
 
-**Which metabolites are the same compound?** Two units meet in the pool
+**Which metabolites are the same compound?** Two organisms meet in the pool
 only if their metabolites resolve to the same name. By default the
 compartment is stripped, which resolves ``glc_D_e`` and ``glc_D[e]`` to the
 same ``glc_D``, so the two spellings share one pool row in either mode.
@@ -225,12 +232,12 @@ same ``glc_D``, so the two spellings share one pool row in either mode.
 What it cannot do is reconcile identifiers from *different namespaces*.
 ``glc__D_e`` and ``glc_D[e]`` are the same molecule under two schemes, and
 no amount of suffix-stripping will tell you so. Left alone that failure is
-silent and total: every unit trades through a pool of its own and nothing
+silent and total: every organism trades through a pool of its own and nothing
 cross-feeds, with no error anywhere. So the builder checks, and says so:
 
 .. code-block:: text
 
-   WARNING pool 'u' is shared by 2 units but not one metabolite in it is
+   WARNING pool 'u' is shared by 2 organisms but not one metabolite in it is
    reached by more than one of them, so nothing can cross-feed. The usual
    cause is identifiers from different namespaces; pass metabolite_key to
    say how they correspond. Examples: {'A': ['glc__D_e'], 'B': ['glc_D[e]']}
@@ -330,7 +337,7 @@ Two drafts each hold part of it:
      pool -> bB [dir=both, color="#c07d2a", constraint=false];
    }
 
-Build the community. Each unit is backed by a *database* — everything it is
+Build the community. Each organism is backed by a *database* — everything it is
 allowed to borrow — and its own draft supplies the bounds:
 
 .. code-block:: python
@@ -387,7 +394,7 @@ Now fill the gaps in both at once:
    result = gapfill_community(community, problem_type="minNetMILP")
 
    result.added        # {'A': ('R2',), 'B': ()}
-   result.models()     # one untagged cobra model per unit
+   result.models()     # one untagged cobra model per organism
 
 ``B`` borrows nothing. What it was missing arrives from ``A`` through the
 pool. ``A`` still needs its one reaction, because it has to feed itself
@@ -404,10 +411,10 @@ What the gap-filler charges for
    * - Reaction
      - Weight
      - Why
-   * - already in the unit's draft
+   * - already in the organism's draft
      - 0
      - it is not an addition
-   * - only in the unit's database
+   * - only in the organism's database
      - 1
      - this is what is counted
    * - transport into a pool
@@ -426,8 +433,8 @@ reaches for fresh material from the medium — exactly the behaviour a
 community model exists to capture.
 
 Under ``minNetLP`` the objective sums weighted *flux*, and a shared
-exchange carries the flux of every unit drawing on it. Charging for it
-therefore penalises a unit for having company, and the solver responds by
+exchange carries the flux of every organism drawing on it. Charging for it
+therefore penalises an organism for having company, and the solver responds by
 adding internal reactions so that it can take up less. Measured on hCom
 organisms against filling each of them on its own:
 
@@ -455,13 +462,13 @@ organisms against filling each of them on its own:
 At weight 0 the community beats filling the members separately at every
 size, and the sequence is orderly. At weight 1 it is erratic, and only
 catches up once there are enough organisms to share the fixed cost of the
-exchanges between them — the pool has one set of them however many units
-there are, so the per-unit charge falls as the community grows. It is also
+exchanges between them — the pool has one set of them however many organisms
+there are, so the per-organism charge falls as the community grows. It is also
 slower while it is wrong: 2,931 seconds against 854 at six organisms.
 
 The mixed-integer formulation does not have the problem, because its
 objective counts reactions rather than flux, so an exchange costs the same
-whether one unit uses it or twenty. At two organisms it adds 8 against 10
+whether one organism uses it or twenty. At two organisms it adds 8 against 10
 filled separately, with the weight left at 1.
 
 So the default follows the formulation: 1 for the MILP, 0 for the LP. Pass
@@ -470,28 +477,28 @@ So the default follows the formulation: 1 for the MILP, 0 for the LP. Pass
 organisms, with the mixed-integer formulation — that is the right number.
 It is small communities under the LP where it misleads.
 
-Two more defaults worth knowing. Each unit's anchor reaction is **core**, so
-every unit has to work — otherwise the cheapest community is one where half
-the members are dead. And ``keep_draft=True`` keeps every reaction a unit
+Two more defaults worth knowing. Each organism's anchor reaction is **core**, so
+every organism has to work — otherwise the cheapest community is one where half
+the members are dead. And ``keep_draft=True`` keeps every reaction an organism
 already had: the formulation returns the *smallest network* meeting the
 requirement, which left to itself would throw away parts of the draft that
 carry no flux under this particular medium. Gap-filling adds; it should not
 quietly subtract.
 
-Coupling, and what a unit is gated on
--------------------------------------
+Coupling, and what an organism is gated on
+------------------------------------------
 
-An absent unit must be absent in full. Not merely not growing — carrying no
+An absent organism must be absent in full. Not merely not growing — carrying no
 flux at all. Otherwise a dead organism goes on running its metabolism and
 feeding its neighbours for free.
 
-That is what coupling does. For every reaction of a unit,
+That is what coupling does. For every reaction of an organism,
 
 .. math::
 
    |v_i| \le c \cdot v_{\text{anchor}} + u
 
-so a reaction can carry flux only in proportion to its unit's **anchor**.
+so a reaction can carry flux only in proportion to its organism's **anchor**.
 The defaults, :math:`c = 1000` and :math:`u = 0.01`, are the published
 values for a microbial community whose anchor is biomass.
 
@@ -503,10 +510,10 @@ past it:
 3. a single reaction named ``biomass*``,
 4. otherwise it refuses, and tells you what the candidates looked like.
 
-Refusing matters. A tissue is rarely growing, so its anchor is usually ATP
-maintenance or a demand reaction with no telling name, and coupling ten
-thousand reactions to the wrong one would throttle or free the whole tissue
-without raising anything.
+Refusing matters. Coupling a few thousand reactions to the wrong anchor
+would throttle or free that whole organism without raising anything, and a
+draft reconstruction may carry several biomass-like reactions or none that
+is named recognisably.
 
 Whatever is chosen is reported:
 
@@ -516,20 +523,20 @@ Whatever is chosen is reported:
 
 .. code-block:: text
 
-   unit    anchor                  how          capacity        cap
+   organism    anchor                  how          capacity        cap
    tis1    DM_atp_c___tis1         given             10.0      1e+04
    tis2    DM_atp_c___tis2         given           0.0001       0.11
 
 ``capacity`` is the most that anchor can carry; ``cap`` is what the coupling
-then permits every reaction in the unit. The second row is the failure to
-watch for. An anchor running at 1e-4 with :math:`c = 1000` caps the whole
-tissue at 0.11, which strangles it silently. The builder warns when it sees
-this.
+then permits every reaction in that organism. The second row is the failure
+to watch for. An anchor running at 1e-4 with :math:`c = 1000` caps the whole
+organism at 0.11, which strangles it silently. The builder warns when it
+sees this.
 
 .. note::
 
    :math:`c` is not a number to be derived; it is a modelling choice about
-   how much flux a unit may carry per unit of anchor. If your anchor runs at
+   how much flux an organism may carry per unit of anchor flux. If your anchor runs at
    a different scale from a bacterial growth rate, raise :math:`c` to match
    it, or pass ``couple=False`` and do without.
 
