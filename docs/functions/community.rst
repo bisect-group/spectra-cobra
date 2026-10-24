@@ -10,9 +10,9 @@ reference network replicated for you.
 :func:`~spectra_cobra.minimal_microbiome` reduces a community to the
 smallest subset that still does the job.
 
-:doc:`../tutorials/multicellular` builds all of this up from a toy and
-explains pools, transports, exchanges and coupling. This page is the
-reference.
+:doc:`../tutorials/community` builds all of this up from a toy and explains
+pools, transports, exchanges and coupling; :doc:`../tutorials/multi_tissue`
+applies the same construction to tissues. This page is the reference.
 
 At a glance
 -----------
@@ -107,7 +107,8 @@ Reference
 See also
 --------
 
-* :doc:`../tutorials/multicellular` — the worked explanation
+* :doc:`../tutorials/community` — the worked explanation
+* :doc:`../tutorials/multi_tissue` — the same, for tissues
 * :doc:`gapfilling` — filling the gaps in every unit at once
 * :doc:`spectra_me` — the extraction this is built on
 * :doc:`formulations` — ``indicator_reactions`` and what it changes

@@ -304,42 +304,6 @@ which is not the same question as what the organism actually does.
 Finding the essential reactions took 45 s (about 290 per medium, 331 in
 union) and the twelve gap-fills 54 s in total.
 
-Why not tradeOff here
----------------------
-
-``tradeOff`` is the natural-looking choice, since signed weights express
-"keep the draft, charge for additions" directly. It does not work for this
-problem, and the reason is structural rather than a matter of tuning: on all
-twelve media it came back **infeasible**.
-
-``tradeOff`` ties each candidate reaction to a binary with
-
-.. math::
-
-   \varepsilon z_i \le \hat v_i \le ub_i z_i
-
-so a reaction that is included must carry at least ``tol``. Growth does not
-work like that. In a full-growth solution on iJO1366, 442 reactions carry
-flux, but 232 of them carry less than 0.1, 24 carry less than ``1e-4``, and
-the smallest carries ``1.96e-06`` — trace demands for cofactors and
-minerals that are nonetheless structurally necessary. Requiring every one of
-them to reach ``tol`` has no solution.
-
-The prediction that follows is exact: ``tradeOff`` should become feasible
-only once ``tol`` drops below that smallest flux, and it does. At
-``tol=1e-5`` it is infeasible; at ``tol=1e-6`` it returns a model. By then
-``tol`` is far below any growth rate worth asking for, so the formulation has
-not been rescued, only emptied of meaning.
-
-``minNetMILP`` has no such requirement. Its constraint is
-:math:`lb_i z_i \le v_i \le ub_i z_i`, which pins the flux to zero when the
-reaction is out but never imposes a floor when it is in, so a trace flux is
-perfectly acceptable.
-
-Use ``tradeOff`` where the requirement is a set of reactions rather than
-biomass — :doc:`gapfilling_tasks` is that case, and it works there — and
-``minNetMILP`` whenever growth is what you are asking for.
-
 Growth is a bound, not a tolerance
 ----------------------------------
 

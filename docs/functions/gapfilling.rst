@@ -58,7 +58,7 @@ returns the *smallest network* that meets the requirement, so left alone it
 would discard parts of the draft that carry no flux under this medium.
 Gap-filling adds; it should not quietly subtract.
 
-:doc:`../tutorials/multicellular` works this through, on a toy and then at
+:doc:`../tutorials/community` works this through, on a toy and then at
 genome scale.
 
 Reference
@@ -81,6 +81,7 @@ See also
 
 * :doc:`../tutorials/gapfilling_media` — growth in a panel of media
 * :doc:`../tutorials/gapfilling_tasks` — towards a task list
-* :doc:`../tutorials/multicellular` — communities and tissues
+* :doc:`../tutorials/community` — communities
+* :doc:`../tutorials/multi_tissue` — tissues
 * :doc:`community` — building the community first
 * :doc:`tasks` — what a task is

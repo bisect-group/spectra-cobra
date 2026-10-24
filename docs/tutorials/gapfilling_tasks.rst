@@ -25,6 +25,17 @@ union is a set of reactions the model must contain, and *that* is something
 That is what :func:`~spectra_cobra.essential_reactions_for_tasks` returns, and
 the worked example below runs it on a real model and task list.
 
+The idea of finding a task's essential reactions first and handing them to the
+extraction as a core set is taken from ftINIT, where it is what makes
+task-constrained extraction affordable enough to run once per cell across a
+single-cell dataset:
+
+   Gustafsson, J., Anton, M., Roshanzamir, F., Jörnsten, R., Kerkhoven, E. J.,
+   Robinson, J. L., and Nielsen, J. (2023). Generation and analysis of
+   context-specific genome-scale metabolic models derived from single-cell
+   RNA-Seq data. *Proceedings of the National Academy of Sciences*, 120(6),
+   e2217868120. https://doi.org/10.1073/pnas.2217868120
+
 .. warning::
 
    This is a necessary condition, not a sufficient one. A task with two
@@ -313,36 +324,6 @@ which were essential to some task:
    draft.remove_reactions(random.Random(0).sample(internal, 150),
                           remove_orphans=False)
 
-.. list-table::
-   :header-rows: 1
-   :widths: 34 16 16 16 18
-
-   * - Model
-     - Reactions
-     - Added
-     - Tasks failing
-     - Time
-   * - draft
-     - 2433
-     - —
-     - 6
-     - —
-   * - ``tradeOff``
-     - 2542
-     - 109
-     - **0**
-     - 7.7 s
-   * - ``minNetMILP``, ``repair=False``
-     - 2449
-     - 16
-     - 1
-     - 6.4 s
-   * - ``minNetMILP`` + ``repair``
-     - 2450
-     - 17
-     - **0**
-     - 7.8 s
-
 Checking the tasks took 0.4 s and finding the 95 essential reactions 5.1 s,
 so the whole preparation is cheaper than a single genome-scale MILP.
 
@@ -377,6 +358,39 @@ Those three rows are one function call each, differing only in arguments:
    minNetMILP, repair=False    2449 reactions,   16 added, 1 failing
    minNetMILP + repair         2450 reactions,   17 added, 0 failing
 
+.. list-table::
+   :header-rows: 1
+   :widths: 34 16 16 16 18
+
+   * - Model
+     - Reactions
+     - Added
+     - Tasks failing
+     - Time
+   * - draft
+     - 2433
+     - —
+     - 6
+     - —
+   * - ``tradeOff``
+     - 2542
+     - 109
+     - **0**
+     - 7.7 s
+   * - ``minNetMILP``, ``repair=False``
+     - 2449
+     - 16
+     - 1
+     - 6.4 s
+   * - ``minNetMILP`` + ``repair``
+     - 2450
+     - 17
+     - **0**
+     - 7.8 s
+
+The draft row is the starting point, and the times are wall clock on one
+machine — useful for their ratio rather than their absolute value.
+
 The first two differ by a factor of seven in what they add, and the
 difference is instructive rather than a matter of taste.
 
@@ -393,8 +407,11 @@ the acetate route. That is luck, and on another draft it would not be.
 ``tradeOff`` works here, but note the condition that makes it work: the core
 is a set of metabolic reactions. Make biomass the core instead and
 ``tradeOff`` becomes infeasible outright, because it requires every included
-reaction to carry at least ``tol`` and growth needs trace fluxes far below
-that. :doc:`gapfilling_media` has the measurement.
+reaction to carry at least ``tol`` while growth needs trace fluxes far below
+that — on iJO1366 at full growth the smallest necessary flux is around
+``2e-06``. Use ``minNetMILP`` whenever growth is what you are asking for; its
+binaries pin a reaction to zero when it is out but impose no floor when it is
+in, so a trace flux is perfectly acceptable.
 
 ``repair`` is what closes the gap the core set could not express. It re-checks
 the tasks after the extraction and, for any still failing, solves once more

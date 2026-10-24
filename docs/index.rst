@@ -77,8 +77,9 @@ Which function do I want?
   :doc:`tutorials/gapfilling_tasks` and :doc:`tutorials/gapfilling_media`.
 * To model several organisms or tissues that trade metabolites, build one
   network from them with :doc:`functions/community` and see
-  :doc:`tutorials/multicellular`. Gap-filling them together rather than one
-  at a time is :func:`~spectra_cobra.gapfill_community`.
+  :doc:`tutorials/community` or :doc:`tutorials/multi_tissue`. Gap-filling
+  them together rather than one at a time is
+  :func:`~spectra_cobra.gapfill_community`.
 * To reduce a community to the smallest membership that still does the job,
   use :func:`~spectra_cobra.minimal_microbiome`.
 * To find the fewest *reactions* a model needs in order to grow in a medium,
@@ -124,7 +125,8 @@ Citation
    tutorials/topology
    tutorials/gapfilling_tasks
    tutorials/gapfilling_media
-   tutorials/multicellular
+   tutorials/community
+   tutorials/multi_tissue
    tutorials/minimal_microbiome
    tutorials/minimal_reactome
    tutorials/recon3d
