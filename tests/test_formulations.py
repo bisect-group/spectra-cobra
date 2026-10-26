@@ -639,3 +639,58 @@ def test_a_group_without_a_weight_is_refused(toy_model: Model) -> None:
             1e-4,
             indicator_groups={"p1": ["R1", "R2"]},
         )
+
+
+def test_milp_tightens_the_integrality_tolerance(toy_model: Model) -> None:
+    """A binary the solver switched off must not leak flux into the result.
+
+    The binaries are tied to their reactions by ``lb_i z_i <= v_i <= ub_i z_i``,
+    so the solver's default integrality tolerance of 1e-7 lets a binary count
+    as zero while permitting a flux of ``1e-7 * ub_i`` -- 1e-4 on the usual
+    bound of 1000, which is far above ``inclusion_cutoff`` and so gets the
+    reaction kept. On Recon3D that put 139 reactions into a 192-reaction
+    result; tightening the tolerance put it at none.
+    """
+    from spectra_cobra.formulations import MILP_INTEGRALITY_TOLERANCE
+
+    min_net_milp(toy_model, {"R5": 1}, _ones(toy_model), 1e-4)
+
+    assert (
+        toy_model.solver.configuration.tolerances.integrality
+        <= MILP_INTEGRALITY_TOLERANCE
+    )
+
+
+def test_the_integrality_tolerance_can_be_overridden(toy_model: Model) -> None:
+    """It is an argument, so a caller may ask for something else."""
+    min_net_milp(
+        toy_model, {"R5": 1}, _ones(toy_model), 1e-4, integrality_tolerance=1e-6
+    )
+
+    assert toy_model.solver.configuration.tolerances.integrality == 1e-6
+
+
+def test_a_refused_tolerance_does_not_stop_the_solve(toy_model: Model) -> None:
+    """Gurobi will not take an integrality tolerance below 1e-9.
+
+    A solver refusing the value, or not exposing the setting at all, is
+    logged rather than raised: the formulation is still solvable, just with
+    the solver's own tolerance.
+    """
+    kept = min_net_milp(
+        toy_model, {"R5": 1}, _ones(toy_model), 1e-4,
+        integrality_tolerance=1e-12,
+    )
+
+    assert kept.included
+
+
+def test_the_lp_formulations_take_the_tolerances_too(toy_model: Model) -> None:
+    """They are accepted on every formulation, not just the mixed-integer ones."""
+    kept = min_net_lp(
+        toy_model, {"R5": 1}, _ones(toy_model), 1e-4,
+        feasibility_tolerance=1e-9, optimality_tolerance=1e-9,
+    )
+
+    assert kept
+    assert toy_model.solver.configuration.tolerances.feasibility == 1e-9

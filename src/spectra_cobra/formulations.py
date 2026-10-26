@@ -64,6 +64,16 @@ ACCEPTABLE_MILP_STATUSES = (OPTIMAL, FEASIBLE, TIME_LIMIT)
 #: extracted reaction set off a solution.
 INCLUSION_CUTOFF_FACTOR = 1e-7
 
+#: The integrality tolerance the mixed-integer formulations ask for. The
+#: solvers default to 1e-7, which is too loose here: a binary is tied to its
+#: reaction by ``lb_i z_i <= v_i <= ub_i z_i``, so a binary sitting at 1e-7
+#: and still counted as zero permits a flux of ``1e-7 * ub_i``, which on the
+#: usual bound of 1000 is 1e-4. That is seven orders of magnitude above
+#: ``inclusion_cutoff``, so reactions the solver switched *off* are counted
+#: as carrying flux and kept. Measured on a 10600-reaction Recon3D: 139 of
+#: 192 reactions in the result arrived that way at 1e-7, and none at 1e-9.
+MILP_INTEGRALITY_TOLERANCE = 1e-9
+
 
 def _check_status(model: "Model", description: str, milp: bool = False) -> str:
     """Raise unless the solver reached a status carrying a usable solution.
@@ -598,6 +608,9 @@ def min_net_lp(
     tol: float,
     steady_state: bool = True,
     inclusion_cutoff: Optional[float] = None,
+    feasibility_tolerance: Optional[float] = None,
+    optimality_tolerance: Optional[float] = None,
+    integrality_tolerance: Optional[float] = None,
 ) -> Set[str]:
     """Extract a model by minimising the weighted total absolute flux.
 
@@ -619,6 +632,16 @@ def min_net_lp(
         model (default ``tol * 1e-7``). Raising it gives a smaller model but
         risks dropping reactions that are load-bearing for a mass balance; see
         :func:`_included_reactions`.
+    feasibility_tolerance : float, optional
+        The solver's primal feasibility tolerance, or None to leave its own
+        in place (the default).
+    optimality_tolerance : float, optional
+        The solver's dual feasibility tolerance, or None to leave its own in
+        place (the default).
+    integrality_tolerance : float, optional
+        Accepted for consistency with the mixed-integer formulations and
+        applied if given, but this formulation has no binaries for it to act
+        on (default None).
 
     Returns
     -------
@@ -638,6 +661,10 @@ def min_net_lp(
     signs = reaction_signs(model)
 
     with model, relaxed_mass_balance(model, steady_state):
+        _apply_tolerances(
+            model, feasibility_tolerance, optimality_tolerance,
+            integrality_tolerance,
+        )
         apply_direction_bounds(model, directions, signs, tol)
         abs_vars = _add_absolute_value_vars(model, free_ids)
 
@@ -662,6 +689,9 @@ def min_net_milp(
     indicator_reactions: Optional[Iterable[str]] = None,
     inclusion_cutoff: Optional[float] = None,
     indicator_groups: Optional[Mapping[str, Iterable[str]]] = None,
+    feasibility_tolerance: Optional[float] = None,
+    optimality_tolerance: Optional[float] = None,
+    integrality_tolerance: Optional[float] = MILP_INTEGRALITY_TOLERANCE,
 ) -> MilpSolution:
     """Extract a model by minimising the weighted reaction count.
 
@@ -694,6 +724,18 @@ def min_net_milp(
     inclusion_cutoff : float, optional
         The absolute flux at which a reaction without an indicator counts as
         used (default ``tol * 1e-7``).
+    feasibility_tolerance : float, optional
+        The solver's primal feasibility tolerance, or None to leave its own
+        in place (the default).
+    optimality_tolerance : float, optional
+        The solver's dual feasibility tolerance, or None to leave its own in
+        place (the default).
+    integrality_tolerance : float, optional
+        How far a binary may sit from a whole number and still count as one
+        (default :data:`MILP_INTEGRALITY_TOLERANCE`, 1e-9). The solvers
+        default to 1e-7, which is too loose here: see that constant for what
+        goes wrong. Gurobi refuses anything below 1e-9, which is why that is
+        the floor. Pass None to leave the solver's own in place.
     indicator_groups : dict of {str: iterable of str}, optional
         Give the reactions of each group **one shared binary** instead of
         one each, so that they are kept or dropped together and cost the
@@ -811,6 +853,10 @@ def min_net_milp(
             {indicators[key]: float(weights[key]) for key in groups}
         )
         _set_time_limit(model, time_limit)
+        _apply_tolerances(
+            model, feasibility_tolerance, optimality_tolerance,
+            integrality_tolerance,
+        )
 
         model.slim_optimize()
         _check_status(model, "minNetMILP problem", milp=True)
@@ -832,6 +878,9 @@ def trade_off(
     previous_solutions: Optional[List[Set[str]]] = None,
     indicator_reactions: Optional[Iterable[str]] = None,
     inclusion_cutoff: Optional[float] = None,
+    feasibility_tolerance: Optional[float] = None,
+    optimality_tolerance: Optional[float] = None,
+    integrality_tolerance: Optional[float] = MILP_INTEGRALITY_TOLERANCE,
 ) -> MilpSolution:
     """Extract a model by maximising the weighted number of reactions kept.
 
@@ -862,6 +911,18 @@ def trade_off(
     inclusion_cutoff : float, optional
         The absolute flux at which a reaction without an indicator counts as
         used (default ``tol * 1e-7``).
+    feasibility_tolerance : float, optional
+        The solver's primal feasibility tolerance, or None to leave its own
+        in place (the default).
+    optimality_tolerance : float, optional
+        The solver's dual feasibility tolerance, or None to leave its own in
+        place (the default).
+    integrality_tolerance : float, optional
+        How far a binary may sit from a whole number and still count as one
+        (default :data:`MILP_INTEGRALITY_TOLERANCE`, 1e-9). The solvers
+        default to 1e-7, which is too loose here: see that constant for what
+        goes wrong. Gurobi refuses anything below 1e-9, which is why that is
+        the floor. Pass None to leave the solver's own in place.
 
     Returns
     -------
@@ -996,6 +1057,10 @@ def trade_off(
             {indicators[r]: float(weights[r]) for r in indicator_ids}
         )
         _set_time_limit(model, time_limit)
+        _apply_tolerances(
+            model, feasibility_tolerance, optimality_tolerance,
+            integrality_tolerance,
+        )
 
         model.slim_optimize()
         _check_status(model, "tradeOff problem", milp=True)
@@ -1014,6 +1079,9 @@ def growth_optim(
     tol: float,
     steady_state: bool = True,
     inclusion_cutoff: Optional[float] = None,
+    feasibility_tolerance: Optional[float] = None,
+    optimality_tolerance: Optional[float] = None,
+    integrality_tolerance: Optional[float] = None,
 ) -> Set[str]:
     """Extract a model by maximising growth while penalising total flux.
 
@@ -1037,6 +1105,16 @@ def growth_optim(
         model (default ``tol * 1e-7``). Raising it gives a smaller model but
         risks dropping reactions that are load-bearing for a mass balance; see
         :func:`_included_reactions`.
+    feasibility_tolerance : float, optional
+        The solver's primal feasibility tolerance, or None to leave its own
+        in place (the default).
+    optimality_tolerance : float, optional
+        The solver's dual feasibility tolerance, or None to leave its own in
+        place (the default).
+    integrality_tolerance : float, optional
+        Accepted for consistency with the mixed-integer formulations and
+        applied if given, but this formulation has no binaries for it to act
+        on (default None).
 
     Returns
     -------
@@ -1075,6 +1153,10 @@ def growth_optim(
     signs = reaction_signs(model)
 
     with model, relaxed_mass_balance(model, steady_state):
+        _apply_tolerances(
+            model, feasibility_tolerance, optimality_tolerance,
+            integrality_tolerance,
+        )
         apply_direction_bounds(model, directions, signs, tol)
         abs_vars = _add_absolute_value_vars(model, penalised_ids)
 
@@ -1089,6 +1171,57 @@ def growth_optim(
         model.slim_optimize()
         _check_status(model, "growthOptim problem")
         return _included_reactions(model, tol, inclusion_cutoff)
+
+
+def _apply_tolerances(
+    model: "Model",
+    feasibility: Optional[float] = None,
+    optimality: Optional[float] = None,
+    integrality: Optional[float] = None,
+) -> None:
+    """Set the solver tolerances a formulation asked for.
+
+    Parameters
+    ----------
+    model : cobra.Model
+        The model whose solver to configure.
+    feasibility : float, optional
+        The primal feasibility tolerance, or None to leave the solver's own
+        in place.
+    optimality : float, optional
+        The dual feasibility tolerance, or None to leave it alone.
+    integrality : float, optional
+        How far a binary may sit from a whole number and still count as one,
+        or None to leave it alone. Meaningless without binaries.
+
+    Notes
+    -----
+    Not every optlang interface exposes every tolerance, and solvers refuse
+    values below their own floor -- Gurobi will not take an integrality
+    tolerance under 1e-9. Either is logged and left alone rather than treated
+    as an error, as with the time limit.
+
+    """
+    wanted = (
+        ("feasibility", feasibility),
+        ("optimality", optimality),
+        ("integrality", integrality),
+    )
+    for name, value in wanted:
+        if value is None:
+            continue
+        try:
+            setattr(model.solver.configuration.tolerances, name, value)
+        except Exception as error:  # noqa: BLE001 - solvers raise their own
+            # A solver that does not expose the tolerance, or refuses the
+            # value for being below its own floor, should not stop the solve.
+            logger.warning(
+                "Could not set the %s tolerance to %.0e on the %s solver: %s",
+                name,
+                value,
+                model.problem.__name__,
+                error,
+            )
 
 
 def _set_time_limit(model: "Model", time_limit: Optional[float]) -> None:
