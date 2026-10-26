@@ -371,64 +371,128 @@ Is minNetMILP worth it at this scale?
 
 ``minNetLP`` minimises the L1 norm of the flux as a proxy for the number of
 reactions; ``minNetMILP`` counts them exactly, with one binary per candidate.
-At genome scale that is an 11000-binary problem, and Gurobi does not come
-close to solving it. It is still worth running, because the proxy is loose
-enough that even a poor incumbent beats the LP by a wide margin.
+At genome scale that is a 10600-binary problem, and Gurobi does not solve it
+to optimality in any time you are willing to wait. It is still worth running:
+the proxy is loose enough that even an incumbent found inside an hour is
+substantially smaller than the LP's answer.
 
-Each row below gave Gurobi ten minutes on an 11303-reaction consistent
-Recon3D variant — a different file from the 10600-reaction one used above,
-so read the rows against each other rather than against the trials — against
-``minNetLP`` on the same core set:
+Each row below gave Gurobi one hour on the same 10600-reaction consistent
+model built at the top of this page, against ``minNetLP`` on the same core
+set, both with the package's own defaults:
 
 .. list-table::
    :header-rows: 1
-   :widths: 10 18 20 14 14 24
+   :widths: 8 13 13 11 10 11 34
 
    * - Core
      - ``minNetLP``
      - ``minNetMILP``
      - Smaller by
-     - MIP gap
+     - LP
+     - MILP
      - Shared / LP only / MILP only
    * - 10
-     - 170
-     - 100
-     - 41%
-     - 65.6%
-     - 78 / 92 / 22
+     - 138
+     - 97
+     - 30%
+     - 10 s
+     - 3600 s
+     - 72 / 66 / 25
    * - 50
-     - 662
-     - 439
-     - 34%
-     - 53.5%
-     - 373 / 289 / 66
+     - 457
+     - 347
+     - 24%
+     - 13 s
+     - 3600 s
+     - 284 / 173 / 63
    * - 200
-     - 1791
-     - 1551
-     - 13%
-     - 36.9%
-     - 1388 / 403 / 163
+     - 1297
+     - 1080
+     - 17%
+     - 13 s
+     - 3600 s
+     - 977 / 320 / 103
 
-Every model kept its whole core set, and no core reaction was blocked in any
-of them.
+Every model kept its whole core set, and no reaction was blocked in any of
+them.
 
-Two things are worth reading off this. The advantage shrinks as the core
+Three things are worth reading off this. The advantage shrinks as the core
 grows, because a larger core forces more of the network and leaves less to
-choose; by a core of 200 the LP is within 13%. And the mixed-integer model is
-not a pruned version of the linear one — it includes reactions the LP left
-out, so the two pick genuinely different routes rather than one being a
-subset of the other.
+choose; by a core of 200 the LP is within 17%. The mixed-integer model is not
+a pruned version of the linear one — it includes reactions the LP left out, so
+the two pick genuinely different routes rather than one being a subset of the
+other. And the advantage is bought with roughly three hundred times the
+solve time, which is the real question to ask before reaching for it.
 
-The solutions are far from proven: at a core of 10 the bound was 31 against
-an incumbent of 90, so a much smaller model may well exist. Treat
-``minNetMILP`` at this scale as "a better answer than the LP for ten minutes
-of effort", not as the minimum network.
+None of the three solves finished. All stopped at ``time_limit`` and returned
+an incumbent, so each figure above is an upper bound on what ``minNetMILP``
+would give at that core size: a smaller model may well exist. Treat it as "a
+better answer than the LP for an hour of effort", not as the minimum network.
 
 .. note::
 
    A solve stopped at ``time_limit`` returns its incumbent and logs a
    warning. Give it more time if the gap matters; the limit binds to the
    second, so budget it directly.
+
+The integrality tolerance matters here
+--------------------------------------
+
+The table above depends on a third numerical setting, alongside the solver
+tolerance and the inclusion cutoff of `Two settings that decide whether it
+works`_. A reaction the MILP switches off still carries the constraint
+:math:`lb_i z_i \le v_i \le ub_i z_i`. When the solver leaves :math:`z_i` at
+its integrality tolerance rather than at exactly zero, and the bounds are the
+usual :math:`\pm 1000`, the flux this permits is the product of the two. At
+cobrapy's applied default of ``1e-7`` that is ``1e-4`` — four orders of
+magnitude above the inclusion cutoff of ``tol * 1e-7 = 1e-11``, so a reaction
+the MILP decided against still clears the cutoff and joins the extracted
+model.
+
+This is not a rounding detail. Measured on the core-10 row above before the
+mixed-integer formulations asked for a tighter tolerance, ``minNetMILP``
+returned 192 reactions rather than 97, and 139 of them were reactions whose
+binary was explicitly off. The MILP looked 39% *larger* than the LP instead
+of 30% smaller. The objective misreports too, and in the same direction: the
+solver reported 53 reactions selected for a model that contained 192, because
+the leaked reactions cost nothing in an objective that counts binaries.
+
+:func:`~spectra_cobra.min_net_milp` and :func:`~spectra_cobra.trade_off`
+therefore ask for an integrality tolerance of ``1e-9`` — the floor on Gurobi
+and CPLEX — by default, and the linear formulations leave the solver alone.
+Across the three rows above, the count of reactions present with their binary
+off was 0, 0 and 3. Nothing has to be passed to get this — the rows were
+measured on the defaults — but every formulation takes all three tolerances
+if you need something else:
+
+.. code-block:: python
+
+   from spectra_cobra import min_net_milp
+
+   solution = min_net_milp(model, directions, weights, tol=1e-4,
+                           time_limit=3600,
+                           integrality_tolerance=1e-9,
+                           feasibility_tolerance=1e-9,
+                           optimality_tolerance=1e-9)
+
+:func:`~spectra_cobra.spectra_me` does not forward them. A feasibility or
+optimality tolerance set on the model is left alone and so carries into the
+extraction, which is what the ``model.tolerance = 1e-9`` above relies on:
+
+.. code-block:: python
+
+   model.solver.configuration.tolerances.feasibility = 1e-9
+
+Integrality is the exception. The mixed-integer formulations always apply
+their own, so setting it on the model has no effect on them — a model set to
+``1e-6`` comes back from ``minNetMILP`` at ``1e-9``. Call the formulation
+directly to use anything else.
+
+Asking for less than ``1e-9`` logs a warning and uses ``1e-9``, since the
+solvers refuse anything lower and would otherwise fall back to their own
+default — which is looser than either. A tolerance a solver does not expose
+at all, such as optimality on GLPK, is logged and skipped rather than raised,
+so the same call still runs on a solver that supports fewer of them.
 
 Reproducing this
 ----------------
@@ -438,9 +502,12 @@ Recon3D is not redistributed with this package. Get
 
    https://github.com/opencobra/COBRA.models/blob/master/mat/Recon3DModel_301.mat
 
-Everything on this page except the ``minNetMILP`` comparison was measured
-against that file, with Gurobi, and the code shown is the code that produced
-the numbers.
+Everything on this page was measured against that file with Gurobi, and the
+code shown is the code that produced the numbers. The one exception is the
+performance-notes table, whose timings come from an earlier 11303-reaction
+consistent variant; its row counts are labelled as such. The ``minNetMILP``
+comparison was run on eight cores of a cluster node, which is why its
+``minNetLP`` times are shorter than the table above reports for a laptop.
 
 References
 ----------
