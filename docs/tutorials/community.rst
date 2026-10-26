@@ -197,13 +197,13 @@ load this way — has nothing for any of the four branches to work with, so set
 **Which metabolites are the same compound?** Two organisms meet in the pool
 only if their metabolites resolve to the same name. By default the
 compartment is stripped, which resolves ``glc_D_e`` and ``glc_D[e]`` to the
-same ``glc_D``, so the two spellings share one pool row in either mode.
+same ``glc_D``, so those two spellings share one pool row in either mode.
 
-What it cannot do is reconcile identifiers from *different namespaces*.
-``glc__D_e`` and ``glc_D[e]`` are the same molecule under two schemes, and
-no amount of suffix-stripping will tell you so. Left alone that failure is
-silent and total: every organism trades through a pool of its own and nothing
-cross-feeds, with no error anywhere. So the builder checks, and says so:
+What it cannot do is reconcile identifiers from *different namespaces*. BiGG
+writes glucose ``glc__D_e`` and AGORA writes it ``glc_D[e]``: the same
+molecule under two schemes, and no amount of suffix-stripping will tell you
+so. If every identifier differed, nothing would cross-feed and the builder
+would say so:
 
 .. code-block:: text
 
@@ -212,24 +212,57 @@ cross-feeds, with no error anywhere. So the builder checks, and says so:
    cause is identifiers from different namespaces; pass metabolite_key to
    say how they correspond. Examples: {'A': ['glc__D_e'], 'B': ['glc_D[e]']}
 
-``metabolite_key`` is the way out. Given a metabolite, return the name of
-the thing it *is*:
+In practice the mismatch is *partial*, which is worse, because there is
+nothing for that check to catch. Pair BiGG's textbook model with an AGORA
+reconstruction and 14 metabolites meet in the pool straight away — ``ac``,
+``o2``, ``co2``, ``succ`` and the like, which both schemes spell the same.
+The community looks like it is cross-feeding. Glucose is not among them.
+
+``metabolite_key`` is the way out. Given a metabolite, return the name of the
+thing it *is*:
 
 .. code-block:: python
 
    import re
+   from pathlib import Path
+   from urllib.request import urlretrieve
+
    from cobra.io import load_matlab_model, load_model
 
-   # agora.mat stands in for any model of yours in the other namespace;
-   # substitute your own file here.
-   bigg_model = load_model("textbook")              # spells it ``glc__D_e``
-   agora_model = load_matlab_model("agora.mat")     # spells it ``glc_D[e]``
+   AGORA = ("https://raw.githubusercontent.com/VirtualMetabolicHuman/AGORA"
+            "/master/CurrentVersion/AGORA_1_03/AGORA_1_03_mat")
+   if not Path("Escherichia_coli_SE11.mat").exists():
+       urlretrieve(f"{AGORA}/Escherichia_coli_SE11.mat",
+                   "Escherichia_coli_SE11.mat")
 
-   build_community_model(
+   bigg_model = load_model("textbook")                           # glc__D_e
+   agora_model = load_matlab_model("Escherichia_coli_SE11.mat")  # glc_D[e]
+
+   def same_compound(met):
+       """Drop the compartment, then collapse BiGG's doubled underscore."""
+       name = re.sub(r"(\[[a-z]\]|_[a-z])$", "", met.id)
+       return name.replace("__", "_")
+
+   community = build_community_model(
        [bigg_model, agora_model],
        organisms=["A", "B"],
-       metabolite_key=lambda met: re.sub(r"_+D(_e|\[e\])$", "_D", met.id),
+       metabolite_key=same_compound,
    )
+
+That takes the shared rows from 14 to 19. The five that join are glucose,
+D-lactate, L-malate, L-glutamate and L-glutamine — every identifier BiGG
+writes with a doubled underscore.
+
+.. warning::
+
+   ``metabolite_key`` *replaces* the default rule rather than adding to it,
+   so it has to handle every metabolite, not just the ones you are fixing.
+   A key that rewrites only the identifiers you noticed — say
+   ``re.sub(r"_+D(_e|\[e\])$", "_D", met.id)`` for the D-sugars — leaves
+   every other identifier with its compartment attached, so ``ac[e]`` and
+   ``ac_e`` stop resolving together. On the pair above that trades the 14
+   matches for 2. Strip the compartment in your key, or you will lose the
+   metabolites that were already fine.
 
 A mapping table from one namespace to the other does the same job and is
 what you want for anything real.
