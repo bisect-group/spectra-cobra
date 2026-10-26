@@ -75,12 +75,17 @@ exceptions noted at the end.
 
 ``inclusion_cutoff``
    The absolute flux at which a reaction counts as part of the extracted
-   model, for the LP formulations (default ``tol * 1e-7``). The default sits
-   far below the solver's own tolerance deliberately: raising it drops
-   reactions that carry almost no flux but are load-bearing for a mass
-   balance, which leaves core reactions in the result yet unable to carry
-   flux. The mixed-integer formulations ignore it and read their answer off
-   their binaries.
+   model (default ``tol * 1e-7``). The default sits far below the solver's
+   own tolerance deliberately: raising it drops reactions that carry almost
+   no flux but are load-bearing for a mass balance, which leaves core
+   reactions in the result yet unable to carry flux.
+
+   For the LP formulations this is the whole membership rule. The
+   mixed-integer formulations take the **union** of their binaries and this
+   rule, so a reaction can be in the result with its binary switched off,
+   having got there on flux alone. It is not ignored there — see
+   :doc:`../tutorials/recon3d`, where that union is what made ``minNetMILP``
+   appear to return larger models than ``minNetLP``.
 
 Not accepted here
 -----------------
