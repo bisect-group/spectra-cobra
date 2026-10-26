@@ -74,6 +74,13 @@ INCLUSION_CUTOFF_FACTOR = 1e-7
 #: 192 reactions in the result arrived that way at 1e-7, and none at 1e-9.
 MILP_INTEGRALITY_TOLERANCE = 1e-9
 
+#: The smallest tolerance the solvers accept. Gurobi refuses any of its
+#: feasibility, optimality or integrality tolerances below this and leaves the
+#: setting at whatever it already was -- which for integrality is the 1e-7
+#: that causes the leakage described above. A value under this is therefore
+#: raised to it rather than passed through and quietly dropped.
+SOLVER_TOLERANCE_FLOOR = 1e-9
+
 
 def _check_status(model: "Model", description: str, milp: bool = False) -> str:
     """Raise unless the solver reached a status carrying a usable solution.
@@ -1196,10 +1203,13 @@ def _apply_tolerances(
 
     Notes
     -----
-    Not every optlang interface exposes every tolerance, and solvers refuse
-    values below their own floor -- Gurobi will not take an integrality
-    tolerance under 1e-9. Either is logged and left alone rather than treated
-    as an error, as with the time limit.
+    A value below :data:`SOLVER_TOLERANCE_FLOOR` is raised to it, with a
+    warning. Passing it through instead would have the solver refuse it and
+    keep its own, looser, tolerance -- the opposite of what was asked for.
+
+    Not every optlang interface exposes every tolerance; glpk has no
+    optimality tolerance, for instance. That is logged and the solve
+    continues, as with the time limit.
 
     """
     wanted = (
@@ -1210,6 +1220,16 @@ def _apply_tolerances(
     for name, value in wanted:
         if value is None:
             continue
+        if value < SOLVER_TOLERANCE_FLOOR:
+            logger.warning(
+                "The %s tolerance cannot go below %.0e, so %.0e has been "
+                "raised to that. Asking for less would leave the solver at "
+                "its own tolerance instead, which is looser than either.",
+                name,
+                SOLVER_TOLERANCE_FLOOR,
+                value,
+            )
+            value = SOLVER_TOLERANCE_FLOOR
         try:
             setattr(model.solver.configuration.tolerances, name, value)
         except Exception as error:  # noqa: BLE001 - solvers raise their own

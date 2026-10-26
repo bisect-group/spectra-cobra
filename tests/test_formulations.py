@@ -670,16 +670,36 @@ def test_the_integrality_tolerance_can_be_overridden(toy_model: Model) -> None:
     assert toy_model.solver.configuration.tolerances.integrality == 1e-6
 
 
-def test_a_refused_tolerance_does_not_stop_the_solve(toy_model: Model) -> None:
-    """Gurobi will not take an integrality tolerance below 1e-9.
+def test_a_tolerance_below_the_floor_is_raised_to_it(toy_model: Model) -> None:
+    """Below 1e-9 the solvers refuse and keep their own, looser, tolerance.
 
-    A solver refusing the value, or not exposing the setting at all, is
-    logged rather than raised: the formulation is still solvable, just with
-    the solver's own tolerance.
+    Passing the value through would therefore get the opposite of what was
+    asked for: a request for 1e-12 would leave integrality at the solver's
+    1e-7. It is raised to the floor instead, with a warning.
+    """
+    from spectra_cobra.formulations import SOLVER_TOLERANCE_FLOOR
+
+    kept = min_net_milp(
+        toy_model, {"R5": 1}, _ones(toy_model), 1e-4,
+        integrality_tolerance=SOLVER_TOLERANCE_FLOOR / 1000,
+    )
+
+    assert kept.included
+    assert (
+        toy_model.solver.configuration.tolerances.integrality
+        == SOLVER_TOLERANCE_FLOOR
+    )
+
+
+def test_an_unsupported_tolerance_does_not_stop_the_solve(toy_model: Model) -> None:
+    """Not every solver exposes every tolerance; glpk has no optimality one.
+
+    That is logged rather than raised, so a script asking for it stays
+    portable across solvers.
     """
     kept = min_net_milp(
         toy_model, {"R5": 1}, _ones(toy_model), 1e-4,
-        integrality_tolerance=1e-12,
+        optimality_tolerance=1e-8,
     )
 
     assert kept.included
