@@ -714,3 +714,34 @@ def test_the_lp_formulations_take_the_tolerances_too(toy_model: Model) -> None:
 
     assert kept
     assert toy_model.solver.configuration.tolerances.feasibility == 1e-9
+
+
+def test_model_tolerance_reports_the_applied_feasibility(toy_model: Model) -> None:
+    """``model.tolerance`` must agree with the solver after a solve.
+
+    cobra caches it in ``Model._tolerance`` and only its own setter writes
+    that, so setting the solver directly would leave ``model.tolerance``
+    reporting the old value -- and this module's own cutoff warning reads it
+    to say what the solver can resolve.
+    """
+    toy_model.tolerance = 1e-7
+
+    min_net_lp(
+        toy_model, {"R5": 1}, _ones(toy_model), 1e-4, feasibility_tolerance=1e-9
+    )
+
+    assert toy_model.solver.configuration.tolerances.feasibility == 1e-9
+    assert toy_model.tolerance == 1e-9, "the cached copy must follow the solver"
+
+
+def test_model_tolerance_is_untouched_when_feasibility_is_waived(
+    toy_model: Model,
+) -> None:
+    """Passing None leaves both the solver and the cached copy alone."""
+    toy_model.tolerance = 1e-7
+
+    min_net_lp(
+        toy_model, {"R5": 1}, _ones(toy_model), 1e-4, feasibility_tolerance=None
+    )
+
+    assert toy_model.tolerance == 1e-7

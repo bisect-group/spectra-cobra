@@ -24,16 +24,20 @@ reading presence from the model would count an absent organism as present.
 Building a community
 --------------------
 
-The nine AGORA reconstructions used here are distributed with SPECTRA, in
-the ``MinimalMicrobiome/models/`` directory of the `paper_codes branch
-<https://github.com/bisect-group/SPECTRA/tree/paper_codes/MinimalMicrobiome>`_
-of the SPECTRA repository. Paths below assume you are in the directory that
-holds ``MinimalMicrobiome``:
+The nine reconstructions are AGORA 1.03, which is public. This downloads
+them, so the page runs from a clean directory with nothing to obtain by
+hand:
 
 .. code-block:: python
 
+   from pathlib import Path
+   from urllib.request import urlretrieve
+
    from cobra.io import load_matlab_model
    from spectra_cobra import build_community_model
+
+   AGORA = ("https://raw.githubusercontent.com/VirtualMetabolicHuman/AGORA"
+            "/master/CurrentVersion/AGORA_1_03/AGORA_1_03_mat")
 
    strains = [
        "Bacteroides_thetaiotaomicron_VPI_5482",
@@ -49,9 +53,23 @@ holds ``MinimalMicrobiome``:
    tags = ["Bthe", "Badl", "Efae", "Ecol", "Erec",
            "Fpra", "Kpne", "Lcas", "Sthe"]
 
-   models = [load_matlab_model(f"MinimalMicrobiome/models/{name}.mat")
+   models_dir = Path("agora_models")
+   models_dir.mkdir(exist_ok=True)
+   for name in strains:
+       target = models_dir / f"{name}.mat"
+       if not target.exists():
+           urlretrieve(f"{AGORA}/{name}.mat", target)
+
+   models = [load_matlab_model(str(models_dir / f"{name}.mat"))
              for name in strains]
    community = build_community_model(models, organisms=tags)
+
+.. note::
+
+   Building this prints nine warnings, one per organism, saying the anchor
+   cannot carry flux and the unit is inert. That is correct and expected:
+   AGORA reconstructions arrive with their exchanges closed, so nothing can
+   grow until a diet opens them. The next section does that.
 
 Each organism keeps its own external compartment; a transport links it to a
 shared pool, and one community exchange connects the pool to the
@@ -72,20 +90,31 @@ Applying a diet
 ---------------
 
 A diet is a set of uptake bounds on the *shared* exchanges. The AGORA diets
-are tab-separated ``EX_<metabolite>(e)``/bound pairs, published at
-`VMH <https://www.vmh.life>`_ and alongside the original implementation at
-`RamanLab/minMicrobiome <https://github.com/RamanLab/minMicrobiome>`_:
+are tab-separated ``EX_<metabolite>(e)``/bound pairs. The one used here is
+the sample diet published alongside the original implementation at
+`RamanLab/minMicrobiome <https://github.com/RamanLab/minMicrobiome>`_, which
+is also public:
 
 .. code-block:: python
 
-   # sample_diet.txt is a diet of your own, in the AGORA format described
-   # above; the links give you one to start from.
+   DIET_URL = ("https://raw.githubusercontent.com/RamanLab/minMicrobiome"
+               "/main/tutorial/sample_diet.txt")
+
+   if not Path("sample_diet.txt").exists():
+       urlretrieve(DIET_URL, "sample_diet.txt")
+
    diet = {}
    with open("sample_diet.txt") as handle:
        for line in handle:
            rxn_id, bound = line.split()
            metabolite = rxn_id[len("EX_"):].removesuffix("(e)")
            diet[metabolite] = abs(float(bound))
+
+   print(len(diet), "metabolites in the diet")
+
+.. code-block:: text
+
+   175 metabolites in the diet
 
 .. code-block:: python
 
@@ -115,6 +144,17 @@ Reducing the community
    )
    print(result.summary())
    print(sorted(result.present), sorted(result.absent))
+
+.. code-block:: text
+
+   2 of 9 organisms; growth 3.694 (needed 2.915), production 8.657 (needed 7.02)
+   ['Ecol', 'Erec'] ['Badl', 'Bthe', 'Efae', 'Fpra', 'Kpne', 'Lcas', 'Sthe']
+
+A warning about reactions carrying less flux than the solver can resolve is
+expected here and does not affect the answer. It concerns which *reactions*
+the solution puts in the model; the membership you asked for is read from
+the organism binaries, which is why ``present`` and ``absent`` are reported
+from ``MilpSolution.selected`` rather than from the reactions that survived.
 
 The requirements are **measured before they are imposed**: the full
 community is solved for its growth, then for how much it can produce while
@@ -165,19 +205,23 @@ forcing each in:
 
 .. code-block:: python
 
-   for forced in (["Fp"], ["Er"]):
+   for forced in (["Fpra"], ["Erec"]):
        result = minimal_microbiome(community, products=["EX_but_u"],
                                    required=forced, growth_fraction=0.8,
                                    product_fraction=0.8)
+       print(f"required={forced}: {sorted(result.present)}")
+       print("   ", result.summary())
 
 .. code-block:: text
 
-   required=['Fp']: ['Ec', 'Fp']  butyrate 13.669 (needed 7.020), growth 3.570
-   required=['Er']: ['Ec', 'Er']  butyrate 8.571 (needed 7.020), growth 3.584
+   required=['Fpra']: ['Ecol', 'Fpra']
+        2 of 9 organisms; growth 3.694 (needed 2.915), production 14.46 (needed 7.02)
+   required=['Erec']: ['Ecol', 'Erec']
+        2 of 9 organisms; growth 3.694 (needed 2.915), production 8.657 (needed 7.02)
 
 Both are two-member communities meeting every constraint, so both are
 optimal: the objective counts organisms, and both cost two. Note that the
-published pair makes considerably *more* butyrate — 13.7 against 8.6 — and
+published pair makes considerably *more* butyrate — 14.5 against 8.7 — and
 that this does not break the tie, because production is a constraint here
 and not the thing being minimised. If you want the most productive of the
 smallest communities, that is a second optimisation, not this one.
@@ -199,7 +243,16 @@ species replaceable? — or to hold a strain you know must be present:
 .. code-block:: python
 
    result = minimal_microbiome(community, products=["EX_but_u"],
-                               required=["Fp"])
+                               required=["Fpra"])
+
+The organisms are named by the ``tags`` given to
+:func:`~spectra_cobra.build_community_model`, so ``required`` takes those
+tags and not the strain names. An unknown one is an error rather than a
+silent miss:
+
+.. code-block:: text
+
+   SpectraError: Not organisms of this community: ['Fp'].
 
 References
 ----------

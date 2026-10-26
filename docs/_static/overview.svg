@@ -1,0 +1,250 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1020 1090" width="1020" height="1090"
+     role="img" aria-label="SPECTRA overview. A universal model, evidence and an objective feed one pipeline: consistency type, consistency check, direction phase, problem type, subset_model, check_extraction. Four formulations attach to the problem type stage. Five applications hang off the result, each tagged with which of universal model, evidence or objective it changes.">
+  <title>SPECTRA — one pipeline, five reconstructions</title>
+
+  <style>
+    .bg    { fill: #EEF2F1; }
+    .box   { fill: #FFFFFF; stroke: #19635F; stroke-width: 1.6; }
+    .box-i { fill: #DCE9E7; stroke: #19635F; stroke-width: 1.6; }
+    .box-o { fill: #19635F; stroke: #19635F; stroke-width: 1.6; }
+    .box-f { fill: #F6E3DA; stroke: #C07A5C; stroke-width: 1.4; }
+    .box-a { fill: #FFFFFF; stroke: #9FB5B2; stroke-width: 1.3; }
+    .dia   { fill: #F6E3DA; stroke: #C07A5C; stroke-width: 1.5; }
+
+    .t     { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; fill: #112725; }
+    .name  { font-size: 15px; font-weight: 600; }
+    .nameo { font-size: 15px; font-weight: 600; fill: #EEF2F1; }
+    .sub   { font-size: 11.5px; fill: #5F7A77; }
+    .subo  { font-size: 11.5px; fill: #BBD3D0; }
+    .math  { font-family: "DejaVu Sans Mono", Menlo, Consolas, monospace; font-size: 12.5px; fill: #8C4428; }
+    .fname { font-family: "DejaVu Sans Mono", Menlo, Consolas, monospace; font-size: 12px; font-weight: 700; fill: #8C4428; }
+    .edge  { font-family: "DejaVu Sans Mono", Menlo, Consolas, monospace; font-size: 10.5px; fill: #5F7A77; }
+    .brk   { font-family: "DejaVu Sans Mono", Menlo, Consolas, monospace; font-size: 11.5px; font-weight: 700; fill: #19635F; }
+    .leg   { font-size: 11px; fill: #5F7A77; }
+
+    .ln    { stroke: #7E9995; stroke-width: 1.5; fill: none; }
+    .ln-d  { stroke: #C07A5C; stroke-width: 1.4; fill: none; stroke-dasharray: 5 3; }
+    .bracket { stroke: #7FA9A5; stroke-width: 1.4; fill: none; }
+
+    .tag-off { fill: #FFFFFF; stroke: #9FB5B2; stroke-width: 1; }
+    .tag-on  { fill: #C07A5C; stroke: #8C4428; stroke-width: 1; }
+    .tag-t   { font-family: "DejaVu Sans Mono", Menlo, Consolas, monospace; font-size: 9px; fill: #5F7A77; }
+    .tag-t-on{ font-family: "DejaVu Sans Mono", Menlo, Consolas, monospace; font-size: 9px; fill: #FFFFFF; font-weight: 700; }
+
+    @media (prefers-color-scheme: dark) {
+      .bg    { fill: #0D1716; }
+      .box   { fill: #152221; stroke: #69BAB2; }
+      .box-i { fill: #17302E; stroke: #69BAB2; }
+      .box-o { fill: #69BAB2; stroke: #69BAB2; }
+      .box-f { fill: #33211A; stroke: #A9694B; }
+      .box-a { fill: #152221; stroke: #3F5753; }
+      .dia   { fill: #33211A; stroke: #A9694B; }
+      .t     { fill: #E2EDEA; }
+      .nameo { fill: #0D1716; }
+      .sub   { fill: #8BA3A0; }
+      .subo  { fill: #10403C; }
+      .math  { fill: #E89E80; }
+      .fname { fill: #E89E80; }
+      .edge  { fill: #8BA3A0; }
+      .brk   { fill: #69BAB2; }
+      .leg   { fill: #8BA3A0; }
+      .ln    { stroke: #5A7471; }
+      .ln-d  { stroke: #A9694B; }
+      .bracket { stroke: #3C6D69; }
+      .tag-off { fill: #152221; stroke: #3F5753; }
+      .tag-on  { fill: #A9694B; stroke: #E89E80; }
+      .tag-t   { fill: #8BA3A0; }
+      .tag-t-on{ fill: #0D1716; }
+    }
+  </style>
+
+  <defs>
+    <marker id="a" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7.5" markerHeight="6.5" orient="auto-start-reverse">
+      <polygon points="0,0 10,4 0,8" fill="#7E9995"/>
+    </marker>
+    <marker id="ac" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0,0 10,4 0,8" fill="#C07A5C"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1020" height="1090"/>
+
+  <!-- ================= INPUTS ================= -->
+  <rect class="box-i" x="48"  y="40" width="262" height="60" rx="5"/>
+  <text class="t name" x="179" y="66" text-anchor="middle">universal model</text>
+  <text class="t sub"  x="179" y="84" text-anchor="middle">what reactions may be drawn from</text>
+
+  <rect class="box-i" x="340" y="40" width="262" height="60" rx="5"/>
+  <text class="t name" x="471" y="66" text-anchor="middle">evidence</text>
+  <text class="t sub"  x="471" y="84" text-anchor="middle">core set · weights · tasks · media</text>
+
+  <rect class="box-i" x="632" y="40" width="262" height="60" rx="5"/>
+  <text class="t name" x="763" y="66" text-anchor="middle">objective</text>
+  <text class="t sub"  x="763" y="84" text-anchor="middle">problem_type</text>
+
+  <path class="ln" d="M 179 100 V 126 H 471"/>
+  <path class="ln" d="M 763 100 V 126 H 471"/>
+  <line class="ln" x1="471" y1="100" x2="471" y2="126"/>
+  <line class="ln" x1="471" y1="126" x2="471" y2="150" marker-end="url(#a)"/>
+
+  <!-- ================= consistency_type ================= -->
+  <polygon class="dia" points="471,156 611,196 471,236 331,196"/>
+  <text class="t name" x="471" y="192" text-anchor="middle">consistency_type</text>
+  <text class="t sub"  x="471" y="210" text-anchor="middle">S·v = 0   or   S·v ≥ 0</text>
+
+  <line class="ln" x1="471" y1="236" x2="471" y2="266" marker-end="url(#a)"/>
+  <text class="edge" x="483" y="256">every stage below</text>
+
+  <!-- ================= SPINE ================= -->
+  <rect class="box" x="321" y="266" width="300" height="60" rx="5"/>
+  <text class="t name" x="471" y="292" text-anchor="middle">consistency check</text>
+  <text class="t sub"  x="471" y="310" text-anchor="middle">two LPs alternate until the set stops shrinking</text>
+
+  <line class="ln" x1="471" y1="326" x2="471" y2="366" marker-end="url(#a)"/>
+  <text class="edge" x="483" y="350">consistent model</text>
+
+  <rect class="box" x="321" y="366" width="300" height="60" rx="5"/>
+  <text class="t name" x="471" y="392" text-anchor="middle">direction phase</text>
+  <text class="t sub"  x="471" y="410" text-anchor="middle">orient each core reaction · seeded, so it repeats</text>
+
+  <line class="ln" x1="471" y1="426" x2="471" y2="466" marker-end="url(#a)"/>
+  <text class="edge" x="483" y="450">directions, weights</text>
+
+  <rect class="box" x="321" y="466" width="300" height="60" rx="5"/>
+  <text class="t name" x="471" y="492" text-anchor="middle">problem_type</text>
+  <text class="t sub"  x="471" y="510" text-anchor="middle">one LP, or one MILP</text>
+
+  <line class="ln" x1="471" y1="526" x2="471" y2="566" marker-end="url(#a)"/>
+  <text class="edge" x="483" y="550">reaction ids</text>
+
+  <rect class="box" x="321" y="566" width="300" height="60" rx="5"/>
+  <text class="t name" x="471" y="592" text-anchor="middle">subset_model</text>
+  <text class="t sub"  x="471" y="610" text-anchor="middle">built from what is kept, never cut down</text>
+
+  <line class="ln" x1="471" y1="626" x2="471" y2="666" marker-end="url(#a)"/>
+  <text class="edge" x="483" y="650">model</text>
+
+  <rect class="box" x="321" y="666" width="300" height="60" rx="5"/>
+  <text class="t name" x="471" y="692" text-anchor="middle">check_extraction</text>
+  <text class="t sub"  x="471" y="710" text-anchor="middle">core present, and able to carry flux</text>
+
+  <line class="ln" x1="471" y1="726" x2="471" y2="762" marker-end="url(#a)"/>
+
+  <rect class="box-o" x="351" y="762" width="240" height="54" rx="5"/>
+  <text class="t nameo" x="471" y="786" text-anchor="middle">reconstructed model</text>
+  <text class="t subo"  x="471" y="803" text-anchor="middle">flux consistent in its own right</text>
+
+  <!-- ================= FORMULATIONS ================= -->
+  <line class="ln-d" x1="621" y1="496" x2="664" y2="496" marker-end="url(#ac)"/>
+
+  <rect class="box-f" x="664" y="394" width="318" height="204" rx="5"/>
+
+  <text class="fname" x="680" y="418">minNetLP</text>
+  <text class="math"  x="680" y="435">min Σ wᵢtᵢ    tᵢ ≥ |vᵢ|</text>
+
+  <text class="fname" x="680" y="464">minNetMILP</text>
+  <text class="math"  x="680" y="481">min Σ wᵢzᵢ    zᵢ ∈ {0,1}</text>
+
+  <text class="fname" x="680" y="510">tradeOff</text>
+  <text class="math"  x="680" y="527">max Σ wᵢzᵢ    wᵢ any real</text>
+
+  <text class="fname" x="680" y="556">growthOptim</text>
+  <text class="math"  x="680" y="573">max Σ𝒸 wᵢvᵢ − Σ wᵢtᵢ</text>
+
+  <text class="t sub" x="823" y="590" text-anchor="middle">S·v = 0 (or ≥ 0),  v ∈ B  throughout</text>
+
+  <!-- ================= BRACKETS: the public API ================= -->
+  <path class="bracket" d="M 300 266 H 288 V 326 H 300"/>
+  <text class="brk" x="276" y="296" text-anchor="middle" transform="rotate(-90 276 296)">spectra_cc</text>
+
+  <path class="bracket" d="M 300 366 H 288 V 726 H 300"/>
+  <text class="brk" x="276" y="546" text-anchor="middle" transform="rotate(-90 276 546)">spectra_me</text>
+
+  <path class="bracket" d="M 258 266 H 246 V 726 H 258"/>
+  <text class="brk" x="234" y="496" text-anchor="middle" transform="rotate(-90 234 496)">spectra_ccme</text>
+
+  <!-- ================= APPLICATIONS ================= -->
+  <path class="ln" d="M 471 816 V 846 H 126 V 876" marker-end="url(#a)"/>
+  <path class="ln" d="M 471 816 V 846 H 318 V 876" marker-end="url(#a)"/>
+  <line class="ln" x1="471" y1="846" x2="471" y2="876" marker-end="url(#a)"/>
+  <path class="ln" d="M 471 816 V 846 H 624 V 876" marker-end="url(#a)"/>
+  <path class="ln" d="M 471 816 V 846 H 816 V 876" marker-end="url(#a)"/>
+
+  <!-- 1 -->
+  <rect class="box-a" x="36" y="876" width="180" height="78" rx="5"/>
+  <text class="t name" x="126" y="900" text-anchor="middle">context-specific</text>
+  <text class="t sub"  x="126" y="917" text-anchor="middle">spectra_me</text>
+  <rect class="tag-off" x="62"  y="928" width="22" height="16" rx="2"/>
+  <text class="tag-t"   x="73"  y="940" text-anchor="middle">U</text>
+  <rect class="tag-off" x="90"  y="928" width="22" height="16" rx="2"/>
+  <text class="tag-t"   x="101" y="940" text-anchor="middle">E</text>
+  <rect class="tag-off" x="118" y="928" width="22" height="16" rx="2"/>
+  <text class="tag-t"   x="129" y="940" text-anchor="middle">O</text>
+  <text class="leg" x="152" y="941">baseline</text>
+
+  <!-- 2 -->
+  <rect class="box-a" x="228" y="876" width="180" height="78" rx="5"/>
+  <text class="t name" x="318" y="900" text-anchor="middle">minimal reactome</text>
+  <text class="t sub"  x="318" y="917" text-anchor="middle">no core set at all</text>
+  <rect class="tag-off" x="254" y="928" width="22" height="16" rx="2"/>
+  <text class="tag-t"   x="265" y="940" text-anchor="middle">U</text>
+  <rect class="tag-on"  x="282" y="928" width="22" height="16" rx="2"/>
+  <text class="tag-t-on" x="293" y="940" text-anchor="middle">E</text>
+  <rect class="tag-on"  x="310" y="928" width="22" height="16" rx="2"/>
+  <text class="tag-t-on" x="321" y="940" text-anchor="middle">O</text>
+
+  <!-- 3 -->
+  <rect class="box-a" x="420" y="876" width="180" height="78" rx="5"/>
+  <text class="t name" x="510" y="900" text-anchor="middle">gap-filled draft</text>
+  <text class="t sub"  x="510" y="917" text-anchor="middle">draft ∪ database</text>
+  <rect class="tag-on"  x="446" y="928" width="22" height="16" rx="2"/>
+  <text class="tag-t-on" x="457" y="940" text-anchor="middle">U</text>
+  <rect class="tag-on"  x="474" y="928" width="22" height="16" rx="2"/>
+  <text class="tag-t-on" x="485" y="940" text-anchor="middle">E</text>
+  <rect class="tag-on"  x="502" y="928" width="22" height="16" rx="2"/>
+  <text class="tag-t-on" x="513" y="940" text-anchor="middle">O</text>
+
+  <!-- 4 -->
+  <rect class="box-a" x="612" y="876" width="180" height="78" rx="5"/>
+  <text class="t name" x="702" y="900" text-anchor="middle">minimal microbiome</text>
+  <text class="t sub"  x="702" y="917" text-anchor="middle">binaries on biomass</text>
+  <rect class="tag-on"  x="638" y="928" width="22" height="16" rx="2"/>
+  <text class="tag-t-on" x="649" y="940" text-anchor="middle">U</text>
+  <rect class="tag-on"  x="666" y="928" width="22" height="16" rx="2"/>
+  <text class="tag-t-on" x="677" y="940" text-anchor="middle">E</text>
+  <rect class="tag-on"  x="694" y="928" width="22" height="16" rx="2"/>
+  <text class="tag-t-on" x="705" y="940" text-anchor="middle">O</text>
+
+  <!-- 5 -->
+  <rect class="box-a" x="804" y="876" width="180" height="78" rx="5"/>
+  <text class="t name" x="894" y="900" text-anchor="middle">community · body</text>
+  <text class="t sub"  x="894" y="917" text-anchor="middle">units joined by a pool</text>
+  <rect class="tag-on"  x="830" y="928" width="22" height="16" rx="2"/>
+  <text class="tag-t-on" x="841" y="940" text-anchor="middle">U</text>
+  <rect class="tag-on"  x="858" y="928" width="22" height="16" rx="2"/>
+  <text class="tag-t-on" x="869" y="940" text-anchor="middle">E</text>
+  <rect class="tag-off" x="886" y="928" width="22" height="16" rx="2"/>
+  <text class="tag-t"   x="897" y="940" text-anchor="middle">O</text>
+
+  <!-- ================= LEGEND ================= -->
+  <line class="ln" x1="36" y1="992" x2="984" y2="992"/>
+
+  <rect class="tag-on" x="36" y="1016" width="22" height="16" rx="2"/>
+  <text class="tag-t-on" x="47" y="1028" text-anchor="middle">E</text>
+  <text class="leg" x="66" y="1028">changed against the baseline</text>
+
+  <rect class="tag-off" x="248" y="1016" width="22" height="16" rx="2"/>
+  <text class="tag-t" x="259" y="1028" text-anchor="middle">E</text>
+  <text class="leg" x="278" y="1028">unchanged</text>
+
+  <rect class="box-f" x="400" y="1014" width="20" height="20" rx="3"/>
+  <text class="leg" x="428" y="1028">formulation</text>
+
+  <rect class="box" x="528" y="1014" width="20" height="20" rx="3"/>
+  <text class="leg" x="556" y="1028">stage of the pipeline</text>
+
+  <rect class="box-i" x="712" y="1014" width="20" height="20" rx="3"/>
+  <text class="leg" x="740" y="1028">supplied by the caller</text>
+
+  <text class="leg" x="36" y="1060">U universal model   ·   E evidence   ·   O objective   —   the three inputs, and the only thing that differs between problems</text>
+</svg>

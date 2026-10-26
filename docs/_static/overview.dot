@@ -1,0 +1,102 @@
+digraph spectra {
+  rankdir=TB;
+  bgcolor="transparent";
+  compound=true;
+  nodesep=0.30;
+  ranksep=0.42;
+  fontname="Helvetica";
+
+  node [fontname="Helvetica", fontsize=11, shape=box, style="filled,rounded",
+        fillcolor="#FFFFFF", color="#19635F", penwidth=1.4, fontcolor="#112725",
+        margin="0.18,0.10"];
+  edge [fontname="Courier", fontsize=9, color="#7E9995", fontcolor="#5F7A77",
+        arrowsize=0.65, penwidth=1.2];
+
+  /* ---------- what the caller supplies ---------- */
+  subgraph cluster_in {
+    label="supplied by the caller";
+    fontsize=10; fontcolor="#5F7A77"; color="#C7D5D2"; style="rounded";
+    node [fillcolor="#DCE9E7"];
+    U [label=<<b>universal model</b><br/><font point-size="9" color="#5F7A77">what reactions may be drawn from</font>>];
+    E [label=<<b>evidence</b><br/><font point-size="9" color="#5F7A77">core set · weights · tasks · media</font>>];
+    O [label=<<b>objective</b><br/><font point-size="9" color="#5F7A77">problem_type</font>>];
+  }
+
+  CT [label=<<b>consistency_type</b><br/><font point-size="9" color="#5F7A77">S·v = 0   or   S·v ≥ 0</font>>,
+      shape=diamond, fillcolor="#F6E3DA", color="#C07A5C", margin="0.02,0.02"];
+
+  /* ---------- the spine ---------- */
+  subgraph cluster_ccme {
+    label="spectra_ccme"; labelloc=b;
+    fontname="Courier"; fontsize=10; fontcolor="#19635F";
+    color="#7FA9A5"; style="rounded"; penwidth=1.2;
+
+    subgraph cluster_cc {
+      label="spectra_cc"; labelloc=t;
+      fontname="Courier"; fontsize=10; fontcolor="#19635F";
+      color="#7FA9A5"; style="rounded"; penwidth=1.2;
+      CC [label=<<b>consistency check</b><br/><font point-size="9" color="#5F7A77">two LPs alternate until the set stops shrinking</font>>];
+    }
+
+    subgraph cluster_me {
+      label="spectra_me"; labelloc=b;
+      fontname="Courier"; fontsize=10; fontcolor="#19635F";
+      color="#7FA9A5"; style="rounded"; penwidth=1.2;
+      DIR [label=<<b>direction phase</b><br/><font point-size="9" color="#5F7A77">orient each core reaction · seeded, so it repeats</font>>];
+      PT  [label=<<b>problem_type</b><br/><font point-size="9" color="#5F7A77">one LP, or one MILP</font>>];
+      SUB [label=<<b>subset_model</b><br/><font point-size="9" color="#5F7A77">built from what is kept, never cut down</font>>];
+      CHK [label=<<b>check_extraction</b><br/><font point-size="9" color="#5F7A77">core present, and able to carry flux</font>>];
+    }
+  }
+
+  OUT [label=<<b>reconstructed model</b><br/><font point-size="9" color="#BBD3D0">flux consistent in its own right</font>>,
+       fillcolor="#19635F", fontcolor="#EEF2F1"];
+
+  /* ---------- the four formulations ---------- */
+  FORM [shape=none, margin=0, label=<
+    <table border="1" cellborder="0" cellspacing="6" cellpadding="2"
+           bgcolor="#F6E3DA" color="#C07A5C" style="rounded">
+      <tr><td align="left"><font face="Courier" point-size="10" color="#8C4428"><b>minNetLP</b></font></td>
+          <td align="left"><font face="Courier" point-size="10" color="#8C4428">min Σ wᵢtᵢ &#160; tᵢ ≥ |vᵢ|</font></td></tr>
+      <tr><td align="left"><font face="Courier" point-size="10" color="#8C4428"><b>minNetMILP</b></font></td>
+          <td align="left"><font face="Courier" point-size="10" color="#8C4428">min Σ wᵢzᵢ &#160; zᵢ ∈ {0,1}</font></td></tr>
+      <tr><td align="left"><font face="Courier" point-size="10" color="#8C4428"><b>tradeOff</b></font></td>
+          <td align="left"><font face="Courier" point-size="10" color="#8C4428">max Σ wᵢzᵢ &#160; wᵢ any real</font></td></tr>
+      <tr><td align="left"><font face="Courier" point-size="10" color="#8C4428"><b>growthOptim</b></font></td>
+          <td align="left"><font face="Courier" point-size="10" color="#8C4428">max Σ𝒸 wᵢvᵢ − Σ wᵢtᵢ</font></td></tr>
+    </table>>];
+
+  /* ---------- applications: U/E/O marks what each one changes ---------- */
+  node [fillcolor="#FFFFFF", color="#9FB5B2", penwidth=1.1];
+
+  A1 [label=<<b>context-specific</b><br/><font point-size="9" color="#5F7A77">spectra_me</font><br/><font face="Courier" point-size="9" color="#9FB5B2">u e o</font>  <font point-size="8" color="#5F7A77">baseline</font>>];
+  A2 [label=<<b>minimal reactome</b><br/><font point-size="9" color="#5F7A77">no core set at all</font><br/><font face="Courier" point-size="9" color="#9FB5B2">u </font><font face="Courier" point-size="9" color="#8C4428"><b>E O</b></font>>];
+  A3 [label=<<b>gap-filled draft</b><br/><font point-size="9" color="#5F7A77">draft ∪ database</font><br/><font face="Courier" point-size="9" color="#8C4428"><b>U E O</b></font>>];
+  A4 [label=<<b>minimal microbiome</b><br/><font point-size="9" color="#5F7A77">binaries on biomass</font><br/><font face="Courier" point-size="9" color="#8C4428"><b>U E O</b></font>>];
+  A5 [label=<<b>community · body</b><br/><font point-size="9" color="#5F7A77">units joined by a pool</font><br/><font face="Courier" point-size="9" color="#8C4428"><b>U E</b></font><font face="Courier" point-size="9" color="#9FB5B2"> o</font>>];
+
+  /* ---------- flow ---------- */
+  U -> CT; E -> CT; O -> CT;
+  CT  -> CC  [label="every stage below"];
+  CC  -> DIR [label="consistent model"];
+  DIR -> PT  [label="directions, weights"];
+  PT  -> SUB [label="reaction ids"];
+  SUB -> CHK [label="model"];
+  CHK -> OUT;
+
+  PT -> FORM [dir=none, style=dashed, color="#C07A5C", constraint=false];
+
+  OUT -> A1; OUT -> A2; OUT -> A3; OUT -> A4; OUT -> A5;
+
+  { rank=same; A1; A2; A3; A4; A5; }
+
+  LEG [shape=none, margin=0, fontsize=9, fontcolor="#5F7A77", label=<
+    <table border="0" cellborder="0" cellspacing="2">
+      <tr><td align="left"><font point-size="9" color="#5F7A77">
+        <b><font color="#8C4428">UPPERCASE</font></b> = changed against the baseline &#160;·&#160;
+        lowercase = unchanged &#160;·&#160;
+        U universal model &#160; E evidence &#160; O objective
+      </font></td></tr>
+    </table>>];
+  A3 -> LEG [style=invis];
+}

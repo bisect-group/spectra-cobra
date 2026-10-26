@@ -1235,6 +1235,14 @@ def _apply_tolerances(
                 model.problem.__name__,
                 error,
             )
+            continue
+        if name == "feasibility":
+            # ``Model.tolerance`` is a cached copy that only cobra's own
+            # setter writes, so setting the solver directly leaves it
+            # reporting the old, looser value. Code that reads it -- this
+            # module's own cutoff warning included -- would then describe a
+            # solver that no longer exists.
+            model._tolerance = value
 
 
 def _set_time_limit(model: "Model", time_limit: Optional[float]) -> None:
