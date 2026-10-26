@@ -81,6 +81,15 @@ MILP_INTEGRALITY_TOLERANCE = 1e-9
 #: raised to it rather than passed through and quietly dropped.
 SOLVER_TOLERANCE_FLOOR = 1e-9
 
+#: The solver tolerance the top-level entry points ask for. Every routine in
+#: this package reads its answer off a solution rather than off the objective,
+#: so the solver's own tolerances decide what the answer contains: a loose
+#: feasibility tolerance leaves core reactions present but unable to carry
+#: flux, and a loose integrality tolerance keeps reactions the solver switched
+#: off. Both failures are silent, which is why the default is the floor rather
+#: than the solver's own looser setting.
+DEFAULT_SOLVER_TOLERANCE = 1e-9
+
 
 def _check_status(model: "Model", description: str, milp: bool = False) -> str:
     """Raise unless the solver reached a status carrying a usable solution.
@@ -617,7 +626,6 @@ def min_net_lp(
     inclusion_cutoff: Optional[float] = None,
     feasibility_tolerance: Optional[float] = None,
     optimality_tolerance: Optional[float] = None,
-    integrality_tolerance: Optional[float] = None,
 ) -> Set[str]:
     """Extract a model by minimising the weighted total absolute flux.
 
@@ -645,10 +653,6 @@ def min_net_lp(
     optimality_tolerance : float, optional
         The solver's dual feasibility tolerance, or None to leave its own in
         place (the default).
-    integrality_tolerance : float, optional
-        Accepted for consistency with the mixed-integer formulations and
-        applied if given, but this formulation has no binaries for it to act
-        on (default None).
 
     Returns
     -------
@@ -668,10 +672,7 @@ def min_net_lp(
     signs = reaction_signs(model)
 
     with model, relaxed_mass_balance(model, steady_state):
-        _apply_tolerances(
-            model, feasibility_tolerance, optimality_tolerance,
-            integrality_tolerance,
-        )
+        _apply_tolerances(model, feasibility_tolerance, optimality_tolerance)
         apply_direction_bounds(model, directions, signs, tol)
         abs_vars = _add_absolute_value_vars(model, free_ids)
 
@@ -1088,7 +1089,6 @@ def growth_optim(
     inclusion_cutoff: Optional[float] = None,
     feasibility_tolerance: Optional[float] = None,
     optimality_tolerance: Optional[float] = None,
-    integrality_tolerance: Optional[float] = None,
 ) -> Set[str]:
     """Extract a model by maximising growth while penalising total flux.
 
@@ -1118,10 +1118,6 @@ def growth_optim(
     optimality_tolerance : float, optional
         The solver's dual feasibility tolerance, or None to leave its own in
         place (the default).
-    integrality_tolerance : float, optional
-        Accepted for consistency with the mixed-integer formulations and
-        applied if given, but this formulation has no binaries for it to act
-        on (default None).
 
     Returns
     -------
@@ -1160,10 +1156,7 @@ def growth_optim(
     signs = reaction_signs(model)
 
     with model, relaxed_mass_balance(model, steady_state):
-        _apply_tolerances(
-            model, feasibility_tolerance, optimality_tolerance,
-            integrality_tolerance,
-        )
+        _apply_tolerances(model, feasibility_tolerance, optimality_tolerance)
         apply_direction_bounds(model, directions, signs, tol)
         abs_vars = _add_absolute_value_vars(model, penalised_ids)
 

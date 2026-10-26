@@ -285,7 +285,27 @@ def test_warns_when_the_solver_tolerance_is_loose(toy_model: Model, caplog) -> N
 
     This is the setting that left core reactions present in a Recon3D
     extraction but unable to carry flux, and it is not one a caller would
-    think to check, so it warns rather than failing quietly.
+    think to check, so it warns rather than failing quietly. Reaching it now
+    takes asking for it, since the default is the floor.
+    """
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="spectra_cobra.extraction"):
+        spectra_me(
+            toy_model, ["R3"], tol=1e-4, seed=0, feasibility_tolerance=1e-7
+        )
+
+    assert any("feasibility tolerance" in r.message for r in caplog.records)
+
+
+def test_a_loose_model_is_tightened_rather_than_warned_about(
+    toy_model: Model, caplog
+) -> None:
+    """The default overrides a loose model, so there is nothing to warn about.
+
+    The warning reports the tolerance the extraction will actually run at,
+    not the one the model arrived with -- otherwise it would tell callers to
+    fix something the default has already fixed for them.
     """
     import logging
 
@@ -293,7 +313,23 @@ def test_warns_when_the_solver_tolerance_is_loose(toy_model: Model, caplog) -> N
     with caplog.at_level(logging.WARNING, logger="spectra_cobra.extraction"):
         spectra_me(toy_model, ["R3"], tol=1e-4, seed=0)
 
-    assert any("model.tolerance" in r.message for r in caplog.records)
+    assert not any("feasibility tolerance" in r.message for r in caplog.records)
+    assert toy_model.solver.configuration.tolerances.feasibility == 1e-9
+
+
+def test_a_loose_model_still_warns_when_the_default_is_waived(
+    toy_model: Model, caplog
+) -> None:
+    """Passing None leaves the model's own tolerance in place, and warns."""
+    import logging
+
+    toy_model.tolerance = 1e-7
+    with caplog.at_level(logging.WARNING, logger="spectra_cobra.extraction"):
+        spectra_me(
+            toy_model, ["R3"], tol=1e-4, seed=0, feasibility_tolerance=None
+        )
+
+    assert any("feasibility tolerance" in r.message for r in caplog.records)
 
 
 def test_no_warning_when_the_tolerance_is_tight(toy_model: Model, caplog) -> None:
@@ -668,3 +704,65 @@ def test_the_failure_only_blames_the_model_when_that_is_possible(
             toy_model, {"R1"}, signs, 1e-4, np.random.default_rng(0),
             core_is_known_live=True)
     assert "blocked in the model as given" not in str(checked.value)
+
+
+def test_spectra_me_forwards_the_tolerances(toy_model: Model) -> None:
+    """The entry point's tolerances reach the solve, not just the signature.
+
+    This is what was missing: the mixed-integer default applied, but a caller
+    going through spectra_me had no way to change it.
+    """
+    spectra_me(
+        toy_model,
+        ["R3"],
+        tol=1e-4,
+        problem_type=MIN_NET_MILP,
+        seed=0,
+        integrality_tolerance=1e-6,
+        feasibility_tolerance=1e-8,
+    )
+
+    tolerances = toy_model.solver.configuration.tolerances
+    assert tolerances.integrality == 1e-6
+    assert tolerances.feasibility == 1e-8
+
+
+def test_spectra_me_defaults_to_the_floor(toy_model: Model) -> None:
+    """Asking for nothing gets the tight tolerances on every formulation."""
+    toy_model.tolerance = 1e-7
+
+    spectra_me(toy_model, ["R3"], tol=1e-4, problem_type=MIN_NET_MILP, seed=0)
+
+    tolerances = toy_model.solver.configuration.tolerances
+    assert tolerances.feasibility == 1e-9
+    assert tolerances.integrality == 1e-9
+
+
+def test_spectra_me_leaves_the_solver_alone_when_asked(toy_model: Model) -> None:
+    """None means the model keeps what it had, on the LP path too."""
+    toy_model.tolerance = 1e-7
+
+    spectra_me(
+        toy_model,
+        ["R3"],
+        tol=1e-4,
+        seed=0,
+        feasibility_tolerance=None,
+        optimality_tolerance=None,
+        integrality_tolerance=None,
+    )
+
+    assert toy_model.solver.configuration.tolerances.feasibility == 1e-7
+
+
+def test_spectra_ccme_forwards_the_tolerances(toy_model: Model) -> None:
+    """Both halves of the single-pass routine run at the asked-for tolerance."""
+    toy_model.tolerance = 1e-7
+
+    spectra_ccme(
+        toy_model, ["R3"], tol=1e-4, problem_type=MIN_NET_MILP, seed=0
+    )
+
+    tolerances = toy_model.solver.configuration.tolerances
+    assert tolerances.feasibility == 1e-9
+    assert tolerances.integrality == 1e-9

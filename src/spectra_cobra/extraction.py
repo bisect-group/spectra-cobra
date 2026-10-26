@@ -37,7 +37,9 @@ from ._orientation import (
 )
 from .exceptions import SpectraError, SpectraSolverError
 from .formulations import (
+    DEFAULT_SOLVER_TOLERANCE,
     MilpSolution,
+    _apply_tolerances,
     growth_optim,
     min_net_lp,
     min_net_milp,
@@ -85,7 +87,9 @@ BLEND_RANGE = (0.45, 0.55)
 MIN_TOLERANCE_RATIO = 1e4
 
 
-def _warn_on_loose_tolerance(model: "Model", tol: float) -> None:
+def _warn_on_loose_tolerance(
+    model: "Model", tol: float, feasibility: Optional[float] = None
+) -> None:
     """Warn when the solver's tolerance is too loose for the flux threshold.
 
     Parameters
@@ -94,25 +98,30 @@ def _warn_on_loose_tolerance(model: "Model", tol: float) -> None:
         The model about to be extracted from.
     tol : float
         The flux threshold the extraction will use.
+    feasibility : float, optional
+        The feasibility tolerance the extraction will ask the solver for, or
+        None if it will leave the solver's own in place -- in which case the
+        model's current tolerance is what gets checked.
 
     Notes
     -----
     This is the single most effective knob on extraction quality, and it is
     not one most callers would think to touch, so it is worth saying out
-    loud rather than leaving in the documentation.
+    loud rather than leaving in the documentation. The default now asks for
+    the floor, so this fires only for a caller who has loosened it.
 
     """
-    ratio = tol / model.tolerance if model.tolerance else float("inf")
+    effective = model.tolerance if feasibility is None else feasibility
+    ratio = tol / effective if effective else float("inf")
     if ratio >= MIN_TOLERANCE_RATIO:
         return
     logger.warning(
-        "model.tolerance is %.3g against tol=%.3g, a ratio of only %.0f. The "
-        "extraction reads its answer off an LP whose mass balance holds to "
-        "the solver's tolerance, so a loose one can leave core reactions "
-        "present in the result but unable to carry flux. Set "
-        "model.tolerance=1e-9, the lowest most solvers accept, before "
-        "extracting.",
-        model.tolerance,
+        "The solver's feasibility tolerance is %.3g against tol=%.3g, a ratio "
+        "of only %.0f. The extraction reads its answer off an LP whose mass "
+        "balance holds to that tolerance, so a loose one can leave core "
+        "reactions present in the result but unable to carry flux. Pass "
+        "feasibility_tolerance=1e-9, the lowest most solvers accept.",
+        effective,
         tol,
         ratio,
     )
@@ -396,6 +405,9 @@ def _solve_formulation(
     inclusion_cutoff: Optional[float] = None,
     indicator_reactions: Optional[Iterable[str]] = None,
     indicator_groups: Optional[Mapping[str, Iterable[str]]] = None,
+    feasibility_tolerance: Optional[float] = DEFAULT_SOLVER_TOLERANCE,
+    optimality_tolerance: Optional[float] = DEFAULT_SOLVER_TOLERANCE,
+    integrality_tolerance: Optional[float] = DEFAULT_SOLVER_TOLERANCE,
 ) -> MilpSolution:
     """Dispatch to the requested network inference formulation.
 
@@ -418,6 +430,9 @@ def _solve_formulation(
     previous_solutions : list of set of str, optional
         Reaction sets to exclude, for the mixed-integer formulations
         (default None).
+    feasibility_tolerance, optimality_tolerance, integrality_tolerance : float, optional
+        The solver tolerances to ask for, each None to leave the solver's own
+        in place (default 1e-9).
 
     Returns
     -------
@@ -457,14 +472,30 @@ def _solve_formulation(
             f"the linear formulations have no binaries at all."
         )
 
+    # The linear formulations have no binaries, so they take no integrality
+    # tolerance.
     if problem_type == MIN_NET_LP:
         kept = min_net_lp(
-            model, directions, weights, tol, steady_state, inclusion_cutoff
+            model,
+            directions,
+            weights,
+            tol,
+            steady_state,
+            inclusion_cutoff,
+            feasibility_tolerance=feasibility_tolerance,
+            optimality_tolerance=optimality_tolerance,
         )
         return MilpSolution(included=kept, selected=kept)
     if problem_type == GROWTH_OPTIM:
         kept = growth_optim(
-            model, directions, weights, tol, steady_state, inclusion_cutoff
+            model,
+            directions,
+            weights,
+            tol,
+            steady_state,
+            inclusion_cutoff,
+            feasibility_tolerance=feasibility_tolerance,
+            optimality_tolerance=optimality_tolerance,
         )
         return MilpSolution(included=kept, selected=kept)
     if problem_type == MIN_NET_MILP:
@@ -479,6 +510,9 @@ def _solve_formulation(
             indicator_reactions=indicator_reactions,
             inclusion_cutoff=inclusion_cutoff,
             indicator_groups=indicator_groups,
+            feasibility_tolerance=feasibility_tolerance,
+            optimality_tolerance=optimality_tolerance,
+            integrality_tolerance=integrality_tolerance,
         )
     return trade_off(
         model,
@@ -490,6 +524,9 @@ def _solve_formulation(
         previous_solutions=previous_solutions,
         indicator_reactions=indicator_reactions,
         inclusion_cutoff=inclusion_cutoff,
+        feasibility_tolerance=feasibility_tolerance,
+        optimality_tolerance=optimality_tolerance,
+        integrality_tolerance=integrality_tolerance,
     )
 
 
@@ -535,6 +572,9 @@ def spectra_me(
     indicator_reactions: Optional[Iterable[str]] = None,
     indicator_groups: Optional[Mapping[str, Iterable[str]]] = None,
     return_solutions: bool = False,
+    feasibility_tolerance: Optional[float] = DEFAULT_SOLVER_TOLERANCE,
+    optimality_tolerance: Optional[float] = DEFAULT_SOLVER_TOLERANCE,
+    integrality_tolerance: Optional[float] = DEFAULT_SOLVER_TOLERANCE,
 ) -> Union["Model", List["Model"], Tuple]:
     """Extract a context-specific model around a set of core reactions.
 
@@ -615,6 +655,22 @@ def spectra_me(
         while its binary is off. When the binaries mean something in
         themselves -- an organism's presence, a group's membership -- that
         distinction is the answer rather than an implementation detail.
+    feasibility_tolerance : float, optional
+        How far the mass balance may be violated and still count as
+        satisfied. The extraction reads its answer off the LP solution, so a
+        tolerance close to `tol` can leave core reactions present in the
+        result but unable to carry flux (default 1e-9, the lowest most
+        solvers accept). Pass None to leave the solver's own in place.
+    optimality_tolerance : float, optional
+        How far a reduced cost may be from optimal and still count as optimal
+        (default 1e-9). None leaves the solver's own in place.
+    integrality_tolerance : float, optional
+        How far a binary may sit from a whole number and still count as one.
+        A binary at 1e-7 against a bound of 1000 permits a flux of 1e-4, well
+        above `inclusion_cutoff`, so reactions the solver switched off are
+        otherwise kept (default 1e-9). Only the mixed-integer `problem_type`
+        values have binaries; it does nothing for the linear ones. None
+        leaves the solver's own in place.
 
     Returns
     -------
@@ -637,7 +693,7 @@ def spectra_me(
     spectra_ccme : The same, for a model that is not known to be consistent.
 
     """
-    _warn_on_loose_tolerance(model, tol)
+    _warn_on_loose_tolerance(model, tol, feasibility_tolerance)
     models, solutions = _spectra_me(
         model,
         core_reactions,
@@ -654,6 +710,9 @@ def spectra_me(
         inclusion_cutoff=inclusion_cutoff,
         indicator_reactions=indicator_reactions,
         indicator_groups=indicator_groups,
+        feasibility_tolerance=feasibility_tolerance,
+        optimality_tolerance=optimality_tolerance,
+        integrality_tolerance=integrality_tolerance,
     )
     extracted = models[0] if n_solutions == 1 else models
     if not return_solutions:
@@ -679,6 +738,9 @@ def _spectra_me(
     indicator_reactions: Optional[Iterable[str]] = None,
     indicator_groups: Optional[Mapping[str, Iterable[str]]] = None,
     core_is_known_live: bool = False,
+    feasibility_tolerance: Optional[float] = DEFAULT_SOLVER_TOLERANCE,
+    optimality_tolerance: Optional[float] = DEFAULT_SOLVER_TOLERANCE,
+    integrality_tolerance: Optional[float] = DEFAULT_SOLVER_TOLERANCE,
 ) -> Tuple[List["Model"], List[MilpSolution]]:
     """Run the extraction, returning the models and the solutions found.
 
@@ -711,6 +773,11 @@ def _spectra_me(
     blocked_ids : set of str, optional
         Core reactions already known to be blocked, which are dropped from the
         core set rather than being required to carry flux (default None).
+    feasibility_tolerance, optimality_tolerance, integrality_tolerance : float, optional
+        The solver tolerances to ask for, each None to leave the solver's own
+        in place (default 1e-9). They are applied before the direction LPs as
+        well as inside the formulation, since the directions are read off a
+        solution too.
 
     Returns
     -------
@@ -727,6 +794,14 @@ def _spectra_me(
         )
 
     steady_state = validate_consistency_type(consistency_type)
+    # The direction LPs below read their answer off a solution as well, so the
+    # tolerances have to be in place before them, not just in the formulation.
+    _apply_tolerances(
+        model,
+        feasibility_tolerance,
+        optimality_tolerance,
+        integrality_tolerance,
+    )
     all_weights = _normalise_weights(model, weights, (indicator_groups or {}))
     core_ids = _normalise_core(model, core_reactions)
     if blocked_ids:
@@ -773,6 +848,9 @@ def _spectra_me(
                 inclusion_cutoff=inclusion_cutoff,
                 indicator_reactions=indicator_reactions,
                 indicator_groups=indicator_groups,
+                feasibility_tolerance=feasibility_tolerance,
+                optimality_tolerance=optimality_tolerance,
+                integrality_tolerance=integrality_tolerance,
             )
         except SpectraSolverError:
             # Excluding every solution found so far can leave the problem with
@@ -816,6 +894,9 @@ def spectra_ccme(
     remove_genes: bool = True,
     seed: Optional[int] = None,
     inclusion_cutoff: Optional[float] = None,
+    feasibility_tolerance: Optional[float] = DEFAULT_SOLVER_TOLERANCE,
+    optimality_tolerance: Optional[float] = DEFAULT_SOLVER_TOLERANCE,
+    integrality_tolerance: Optional[float] = DEFAULT_SOLVER_TOLERANCE,
 ) -> Tuple["Model", List[str]]:
     """Check consistency and extract a model in a single pass.
 
@@ -864,6 +945,22 @@ def spectra_ccme(
         (default True). Orphaned metabolites are always dropped.
     seed : int, optional
         A seed for the random coefficients (default None).
+    feasibility_tolerance : float, optional
+        How far the mass balance may be violated and still count as
+        satisfied. Both halves of this routine read their answer off a
+        solution, so a tolerance close to `tol` lets a reaction pass the
+        consistency check on residual rather than real flux, and can leave
+        core reactions present in the extraction but unable to carry flux
+        (default 1e-9, the lowest most solvers accept). Pass None to leave
+        the solver's own in place.
+    optimality_tolerance : float, optional
+        How far a reduced cost may be from optimal and still count as optimal
+        (default 1e-9). None leaves the solver's own in place.
+    integrality_tolerance : float, optional
+        How far a binary may sit from a whole number and still count as one
+        (default 1e-9). Only the mixed-integer `problem_type` values have
+        binaries; it does nothing for the linear ones, and the consistency
+        check has none either. None leaves the solver's own in place.
 
     Returns
     -------
@@ -879,7 +976,15 @@ def spectra_ccme(
 
     """
     steady_state = validate_consistency_type(consistency_type)
-    _warn_on_loose_tolerance(model, tol)
+    _warn_on_loose_tolerance(model, tol, feasibility_tolerance)
+    # The consistency loop below reads its answer off a solution, so the
+    # tolerances have to be in place before it as well as in the formulation.
+    _apply_tolerances(
+        model,
+        feasibility_tolerance,
+        optimality_tolerance,
+        integrality_tolerance,
+    )
     core_ids = _normalise_core(model, core_reactions)
     signs = reaction_signs(model)
     rng = np.random.default_rng(seed)
@@ -941,6 +1046,9 @@ def spectra_ccme(
         time_limit,
         previous_solutions=None,
         inclusion_cutoff=inclusion_cutoff,
+        feasibility_tolerance=feasibility_tolerance,
+        optimality_tolerance=optimality_tolerance,
+        integrality_tolerance=integrality_tolerance,
     )
     first = _extract(model, solution.included, remove_genes)
 
@@ -975,5 +1083,8 @@ def spectra_ccme(
         # The blocked core reactions have already been dropped above, so a
         # settling failure here is not evidence of an inconsistent model.
         core_is_known_live=True,
+        feasibility_tolerance=feasibility_tolerance,
+        optimality_tolerance=optimality_tolerance,
+        integrality_tolerance=integrality_tolerance,
     )
     return [first] + rest, blocked_core

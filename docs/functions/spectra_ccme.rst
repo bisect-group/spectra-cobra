@@ -87,6 +87,17 @@ exceptions noted at the end.
    :doc:`../tutorials/recon3d`, where that union is what made ``minNetMILP``
    appear to return larger models than ``minNetLP``.
 
+``feasibility_tolerance``, ``optimality_tolerance``, ``integrality_tolerance``
+   The solver tolerances both halves of the pass run at, each defaulting to
+   ``1e-9``, the lowest most solvers accept. The consistency check decides
+   whether a reaction reached ``tol``, and the extraction reads its membership
+   off a solution, so a loose feasibility tolerance can let a reaction pass
+   the check on residual rather than real flux and then sit in the result
+   unable to carry any. Pass ``None`` for any of them to leave the solver's
+   own in place. ``integrality_tolerance`` reaches only the mixed-integer
+   ``problem_type`` values; neither the consistency check nor the linear
+   formulations have binaries.
+
 Not accepted here
 -----------------
 

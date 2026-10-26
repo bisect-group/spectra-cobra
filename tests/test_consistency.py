@@ -102,3 +102,52 @@ def test_does_not_modify_the_input_model(blocked_model: Model) -> None:
         for m in blocked_model.metabolites
     } == before_constraints
     assert len(blocked_model.variables) == 2 * len(blocked_model.reactions)
+
+
+def test_the_check_tightens_the_solver(toy_model: Model) -> None:
+    """The consistency check asks for the floor by default.
+
+    A reaction counts as consistent when an LP drives it to ``tol``, so a
+    feasibility tolerance near ``tol`` would let one pass on residual rather
+    than on real flux.
+    """
+    toy_model.tolerance = 1e-7
+
+    spectra_cc(toy_model, tol=1e-4, seed=0)
+
+    assert toy_model.solver.configuration.tolerances.feasibility == 1e-9
+
+
+def test_the_check_leaves_the_solver_alone_when_asked(toy_model: Model) -> None:
+    """Passing None keeps whatever the model already had."""
+    toy_model.tolerance = 1e-7
+
+    spectra_cc(
+        toy_model,
+        tol=1e-4,
+        seed=0,
+        feasibility_tolerance=None,
+        optimality_tolerance=None,
+    )
+
+    assert toy_model.solver.configuration.tolerances.feasibility == 1e-7
+
+
+def test_the_check_takes_no_integrality_tolerance(toy_model: Model) -> None:
+    """There are no binaries in the consistency check, so there is no knob.
+
+    Accepting one would suggest it does something.
+    """
+    with pytest.raises(TypeError, match="integrality_tolerance"):
+        spectra_cc(toy_model, tol=1e-4, seed=0, integrality_tolerance=1e-9)
+
+
+def test_the_tolerances_reach_the_helpers(toy_model: Model) -> None:
+    """blocked_reaction_ids and consistent_reaction_ids take them too."""
+    toy_model.tolerance = 1e-7
+    blocked_reaction_ids(toy_model, tol=1e-4, seed=0)
+    assert toy_model.solver.configuration.tolerances.feasibility == 1e-9
+
+    toy_model.tolerance = 1e-7
+    consistent_reaction_ids(toy_model, tol=1e-4, seed=0)
+    assert toy_model.solver.configuration.tolerances.feasibility == 1e-9

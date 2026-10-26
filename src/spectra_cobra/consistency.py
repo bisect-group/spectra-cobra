@@ -13,6 +13,7 @@ from ._orientation import (
     relaxed_mass_balance,
     validate_consistency_type,
 )
+from .formulations import DEFAULT_SOLVER_TOLERANCE, _apply_tolerances
 
 if TYPE_CHECKING:
     from cobra.core import Model
@@ -27,6 +28,8 @@ def consistent_reaction_ids(
     consistency_type: str = STOICHIOMETRY,
     detection_cutoff: Optional[float] = None,
     seed: Optional[int] = None,
+    feasibility_tolerance: Optional[float] = DEFAULT_SOLVER_TOLERANCE,
+    optimality_tolerance: Optional[float] = DEFAULT_SOLVER_TOLERANCE,
 ) -> Tuple[Set[str], int]:
     """Find the flux consistent reactions of a model.
 
@@ -48,6 +51,15 @@ def consistent_reaction_ids(
     seed : int, optional
         A seed for the random objective coefficients, making the result
         reproducible (default None).
+    feasibility_tolerance : float, optional
+        How far the mass balance may be violated and still count as
+        satisfied. A reaction counts as consistent when an LP drives it to
+        ``tol``, so a feasibility tolerance near ``tol`` lets a reaction pass
+        on residual rather than on real flux (default 1e-9, the lowest most
+        solvers accept). Pass None to leave the solver's own in place.
+    optimality_tolerance : float, optional
+        How far a reduced cost may be from optimal and still count as optimal
+        (default 1e-9). None leaves the solver's own in place.
 
     Returns
     -------
@@ -61,6 +73,9 @@ def consistent_reaction_ids(
         detection_cutoff = 0.99 * tol
     rng = np.random.default_rng(seed)
 
+    # The consistency check has no binaries, so there is no integrality
+    # tolerance to set.
+    _apply_tolerances(model, feasibility_tolerance, optimality_tolerance)
     signs = reaction_signs(model)
     # Reactions that have not been shown to carry flux yet.
     rxns_to_check = set(signs)
@@ -107,6 +122,8 @@ def spectra_cc(
     consistency_type: str = STOICHIOMETRY,
     detection_cutoff: Optional[float] = None,
     seed: Optional[int] = None,
+    feasibility_tolerance: Optional[float] = DEFAULT_SOLVER_TOLERANCE,
+    optimality_tolerance: Optional[float] = DEFAULT_SOLVER_TOLERANCE,
 ) -> "Model":
     r"""Check the consistency of a metabolic network using SPECTRA.
 
@@ -135,6 +152,15 @@ def spectra_cc(
         (default ``0.99 * tol``).
     seed : int, optional
         A seed for the random objective coefficients (default None).
+    feasibility_tolerance : float, optional
+        How far the mass balance may be violated and still count as
+        satisfied. A reaction counts as consistent when an LP drives it to
+        ``tol``, so a feasibility tolerance near ``tol`` lets a reaction pass
+        on residual rather than on real flux (default 1e-9, the lowest most
+        solvers accept). Pass None to leave the solver's own in place.
+    optimality_tolerance : float, optional
+        How far a reduced cost may be from optimal and still count as optimal
+        (default 1e-9). None leaves the solver's own in place.
 
     Returns
     -------
@@ -147,7 +173,13 @@ def spectra_cc(
 
     """
     consistent_ids, _ = consistent_reaction_ids(
-        model, tol, consistency_type, detection_cutoff, seed
+        model,
+        tol,
+        consistency_type,
+        detection_cutoff,
+        seed,
+        feasibility_tolerance=feasibility_tolerance,
+        optimality_tolerance=optimality_tolerance,
     )
 
     return subset_model(model, consistent_ids)
@@ -159,6 +191,8 @@ def blocked_reaction_ids(
     consistency_type: str = STOICHIOMETRY,
     detection_cutoff: Optional[float] = None,
     seed: Optional[int] = None,
+    feasibility_tolerance: Optional[float] = DEFAULT_SOLVER_TOLERANCE,
+    optimality_tolerance: Optional[float] = DEFAULT_SOLVER_TOLERANCE,
 ) -> List[str]:
     """Find the blocked reactions of a model.
 
@@ -176,6 +210,13 @@ def blocked_reaction_ids(
         (default ``0.99 * tol``).
     seed : int, optional
         A seed for the random objective coefficients (default None).
+    feasibility_tolerance : float, optional
+        How far the mass balance may be violated and still count as satisfied
+        (default 1e-9, the lowest most solvers accept). None leaves the
+        solver's own in place.
+    optimality_tolerance : float, optional
+        How far a reduced cost may be from optimal and still count as optimal
+        (default 1e-9). None leaves the solver's own in place.
 
     Returns
     -------
@@ -185,7 +226,13 @@ def blocked_reaction_ids(
 
     """
     consistent_ids, _ = consistent_reaction_ids(
-        model, tol, consistency_type, detection_cutoff, seed
+        model,
+        tol,
+        consistency_type,
+        detection_cutoff,
+        seed,
+        feasibility_tolerance=feasibility_tolerance,
+        optimality_tolerance=optimality_tolerance,
     )
     return [rxn.id for rxn in model.reactions if rxn.id not in consistent_ids]
 

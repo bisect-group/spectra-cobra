@@ -72,6 +72,19 @@ Arguments worth knowing
       solution.selected      # the indicators switched on
       solution.included      # those, plus whatever carries flux regardless
 
+``feasibility_tolerance``, ``optimality_tolerance``, ``integrality_tolerance``
+   The solver tolerances the extraction runs at, each defaulting to ``1e-9``,
+   the lowest most solvers accept. These are not cosmetic: the extraction
+   reads its answer off a solution rather than off the objective, so a loose
+   feasibility tolerance leaves core reactions present but unable to carry
+   flux, and a loose integrality tolerance keeps reactions whose binary the
+   solver switched off. Both failures are silent. Pass ``None`` for any of
+   them to leave the solver's own in place. See
+   :doc:`../tutorials/recon3d` for what each one costs when it is wrong.
+
+   ``integrality_tolerance`` reaches only the mixed-integer ``problem_type``
+   values; ``minNetLP`` and ``growthOptim`` have no binaries for it to act on.
+
 Errors
 ------
 

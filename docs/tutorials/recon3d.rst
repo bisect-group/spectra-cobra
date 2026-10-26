@@ -216,12 +216,18 @@ failure back, so it is worth knowing what they do.
 **1. Tighten the solver.** This is the big one, and the least obvious. The
 extraction reads its answer off an LP solution whose mass balance holds only
 to the solver's feasibility tolerance. At cobrapy's default of ``1e-7``, that
-residual is enough to break chains carrying flux of order ``tol = 1e-4``. Set
-it as low as the solver allows — ``1e-9`` is the floor on Gurobi and CPLEX:
+residual is enough to break chains carrying flux of order ``tol = 1e-4``. The
+entry points therefore ask for ``1e-9`` — the floor on Gurobi and CPLEX — so
+this now takes care of itself. Loosening it is a deliberate act:
 
 .. code-block:: python
 
-   model.tolerance = 1e-9
+   # The default. Nothing to pass.
+   extracted = spectra_me(consistent, core, tol=1e-4)
+
+   # Back to the solver's own, and to the failures below.
+   extracted = spectra_me(consistent, core, tol=1e-4,
+                          feasibility_tolerance=None)
 
 **2. Do not floor the inclusion cutoff.** A reaction joins the extracted
 model when its flux clears ``inclusion_cutoff``, which defaults to
@@ -254,17 +260,22 @@ With both in place every one of the twelve trials returns a model containing
 all of its core reactions, every one of them able to carry flux, with no
 failures — and slightly faster, at 46–50 s rather than 50–61 s.
 
-:func:`~spectra_cobra.spectra_me` warns when ``model.tolerance`` is within a
-factor of 1e4 of ``tol``, since this is not a setting most callers would
-think to check.
+:func:`~spectra_cobra.spectra_me` warns when the feasibility tolerance it is
+about to run at comes within a factor of 1e4 of ``tol``. Since the default is
+the floor, reaching this takes either passing a loose tolerance or passing
+None to keep the model's own.
 
 .. code-block:: text
 
-   model.tolerance is 1e-07 against tol=0.0001, a ratio of only 1000. The
-   extraction reads its answer off an LP whose mass balance holds to the
-   solver's tolerance, so a loose one can leave core reactions present in the
-   result but unable to carry flux. Set model.tolerance=1e-9, the lowest most
-   solvers accept, before extracting.
+   The solver's feasibility tolerance is 1e-07 against tol=0.0001, a ratio of
+   only 1000. The extraction reads its answer off an LP whose mass balance
+   holds to that tolerance, so a loose one can leave core reactions present
+   in the result but unable to carry flux. Pass feasibility_tolerance=1e-9,
+   the lowest most solvers accept.
+
+The warning reports the tolerance the extraction will actually use, not the
+one the model arrived with, so a model left at cobrapy's ``1e-7`` draws no
+complaint — the default has already overridden it.
 
 Verifying the result
 --------------------
@@ -459,40 +470,34 @@ the leaked reactions cost nothing in an objective that counts binaries.
 
 :func:`~spectra_cobra.min_net_milp` and :func:`~spectra_cobra.trade_off`
 therefore ask for an integrality tolerance of ``1e-9`` — the floor on Gurobi
-and CPLEX — by default, and the linear formulations leave the solver alone.
+and CPLEX — by default; the linear formulations have no binaries to set it on.
 Across the three rows above, the count of reactions present with their binary
 off was 0, 0 and 3. Nothing has to be passed to get this — the rows were
-measured on the defaults — but every formulation takes all three tolerances
-if you need something else:
+measured on the defaults — but all three tolerances are arguments of every
+entry point, so you can set them per call:
 
 .. code-block:: python
 
-   from spectra_cobra import min_net_milp
+   extracted = spectra_me(consistent, core, tol=1e-4,
+                          problem_type="minNetMILP", time_limit=3600,
+                          feasibility_tolerance=1e-9,
+                          optimality_tolerance=1e-9,
+                          integrality_tolerance=1e-9)
 
-   solution = min_net_milp(model, directions, weights, tol=1e-4,
-                           time_limit=3600,
-                           integrality_tolerance=1e-9,
-                           feasibility_tolerance=1e-9,
-                           optimality_tolerance=1e-9)
+:func:`~spectra_cobra.spectra_cc` takes the first two. It solves only LPs, so
+there is no integrality tolerance to set, and asking for one is an error
+rather than a setting that does nothing. The same holds for ``minNetLP`` and
+``growthOptim`` within :func:`~spectra_cobra.spectra_me`: the argument is
+accepted there because one ``problem_type`` away it matters, but it reaches
+only the formulations that have binaries.
 
-:func:`~spectra_cobra.spectra_me` does not forward them. A feasibility or
-optimality tolerance set on the model is left alone and so carries into the
-extraction, which is what the ``model.tolerance = 1e-9`` above relies on:
-
-.. code-block:: python
-
-   model.solver.configuration.tolerances.feasibility = 1e-9
-
-Integrality is the exception. The mixed-integer formulations always apply
-their own, so setting it on the model has no effect on them — a model set to
-``1e-6`` comes back from ``minNetMILP`` at ``1e-9``. Call the formulation
-directly to use anything else.
-
-Asking for less than ``1e-9`` logs a warning and uses ``1e-9``, since the
-solvers refuse anything lower and would otherwise fall back to their own
-default — which is looser than either. A tolerance a solver does not expose
-at all, such as optimality on GLPK, is logged and skipped rather than raised,
-so the same call still runs on a solver that supports fewer of them.
+Passing ``None`` for any of them leaves the solver's own in place, which is
+how you get the old behaviour back. Asking for less than ``1e-9`` logs a
+warning and uses ``1e-9``, since the solvers refuse anything lower and would
+otherwise fall back to their own default — looser than either. A tolerance a
+solver does not expose at all, such as optimality on GLPK, is logged and
+skipped rather than raised, so the same call still runs on a solver that
+supports fewer of them.
 
 Reproducing this
 ----------------

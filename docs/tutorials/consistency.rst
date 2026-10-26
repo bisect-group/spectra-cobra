@@ -84,9 +84,11 @@ Choosing ``tol``
 and by default also the magnitude a reaction must reach to count as
 consistent. Two things to keep in mind.
 
-* It must sit comfortably above the solver's own tolerance, or you are
-  measuring numerical noise. ``model.tolerance`` is ``1e-7`` by default, so
-  ``tol`` of ``1e-4`` or larger is safe.
+* It must sit comfortably above the solver's feasibility tolerance, or you
+  are measuring numerical noise. :func:`~spectra_cobra.spectra_cc` asks for
+  ``1e-9``, the lowest most solvers accept, so ``tol`` of ``1e-4`` or larger
+  is safe. Pass ``feasibility_tolerance=None`` to keep the model's own
+  instead, which in cobrapy is ``1e-7``.
 * Raising it tightens the definition. A reaction whose maximum attainable flux
   is ``1e-5`` is consistent at ``tol=1e-6`` and blocked at ``tol=1e-4``.
 
