@@ -367,9 +367,9 @@ Those three rows are one function call each, differing only in arguments:
 
 .. code-block:: text
 
-   tradeOff                    2542 reactions,  109 added, 0 failing
-   minNetMILP, repair=False    2449 reactions,   16 added, 1 failing
-   minNetMILP + repair         2450 reactions,   17 added, 0 failing
+   tradeOff                    2522 reactions,   89 added, 0 failing
+   minNetMILP, repair=False    2448 reactions,   15 added, 1 failing
+   minNetMILP + repair         2449 reactions,   16 added, 0 failing
 
 .. list-table::
    :header-rows: 1
@@ -386,18 +386,18 @@ Those three rows are one function call each, differing only in arguments:
      - 6
      - —
    * - ``tradeOff``
-     - 2542
-     - 109
+     - 2522
+     - 89
      - **0**
      - 7.7 s
    * - ``minNetMILP``, ``repair=False``
-     - 2449
-     - 16
+     - 2448
+     - 15
      - 1
      - 6.4 s
    * - ``minNetMILP`` + ``repair``
-     - 2450
-     - 17
+     - 2449
+     - 16
      - **0**
      - 7.8 s
 
@@ -431,9 +431,65 @@ the tasks after the extraction and, for any still failing, solves once more
 inside that task's own constraints — where the model is already forced to
 perform it, so minimising the reactions not already present gives the
 cheapest repair directly. Here it cost one extra reaction and one extra
-solve, and took the failures to zero: 2450 reactions against ``tradeOff``'s
-2542. Minimise, then repair what the core could not express — 92 reactions
+solve, and took the failures to zero: 2449 reactions against ``tradeOff``'s
+2522. Minimise, then repair what the core could not express — 73 reactions
 smaller, and correct for a reason rather than by accident.
+
+Where this fits
+---------------
+
+The two phases serve two different jobs, and only one of them should call
+:func:`~spectra_cobra.gapfill_for_tasks` end to end.
+
+**Automated genome-scale reconstruction.** A draft comes out of a pipeline
+and a task list says what the organism must be able to do. Call
+:func:`~spectra_cobra.gapfill_for_tasks` directly, as above: it derives the
+essential reactions, extracts around them, and repairs what is left.
+
+**Context-specific modelling.** Here the core set is not the tasks alone. It
+is the reactions your evidence calls active *plus* the task-essential ones —
+what the data says is on, together with what the model must keep to stay
+functional. Do not hand this to
+:func:`~spectra_cobra.gapfill_for_tasks`: its core solve would recompute the
+essential reactions and extract again with flat weights, discarding the
+evidence that made the model context-specific in the first place. Run the
+extraction yourself, then repair:
+
+.. code-block:: python
+
+   from spectra_cobra import (
+       essential_reactions_for_tasks, gapfill_for_tasks, spectra_me,
+   )
+
+   # 1. What the tasks require, whatever the data says.
+   essential, _ = essential_reactions_for_tasks(universal, tasks)
+
+   # 2. What your context says is active, and how strongly.
+   expressed = {"PGI", "PFK", "FBA", "TPI", "GAPD", "PGK"}
+   evidence = {rxn.id: (0.1 if rxn.id in expressed else 1.0)
+               for rxn in universal.reactions}
+
+   # 3. One core set, one extraction, your evidence as the weights.
+   core = sorted(expressed | essential)
+   context = spectra_me(universal, core, tol=1e-4, weights=evidence, seed=0)
+   print(f"context-specific model: {len(context.reactions)} reactions")
+
+   # 4. Repair only -- the core solve has already happened.
+   result = gapfill_for_tasks(context, universal, tasks,
+                              essential_reactions=essential,
+                              core_solve=False)
+   print(f"after repair: {len(result.model.reactions)} reactions, "
+         f"{len(result.satisfied)}/{len(tasks)} tasks")
+
+.. code-block:: text
+
+   context-specific model: 207 reactions
+   after repair: 219 reactions, 23/23 tasks
+
+``core_solve=False`` is what stops the second call redoing the first. The
+repair still runs, so the tasks the core set could not guarantee are still
+caught — which matters more here than in the automated case, because a core
+set built from expression evidence was never chosen to satisfy the tasks.
 
 Validate the task list first
 ----------------------------

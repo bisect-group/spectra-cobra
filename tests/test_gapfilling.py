@@ -174,3 +174,64 @@ def test_gapfilling_towards_tasks(universal) -> None:
 
     assert result.unsatisfied == (), result.summary()
     assert set(result.satisfied) == {"atp", "glutamate"}
+
+
+def test_weights_steer_which_reactions_are_added(draft, universal, media) -> None:
+    """Evidence changes the choice, not just the cost.
+
+    ENO has no alternative, so it is added whatever the weights say. The
+    point here is that making a reaction expensive keeps it out when the
+    network can manage without it: the unweighted run and a run that prices
+    the gaps highly should not agree on everything.
+    """
+    plain = gapfill_for_growth(draft, universal, media, seed=0)
+    # Price the knocked-out reactions far above everything else.
+    costly = gapfill_for_growth(
+        draft, universal, media, weights={r: 1000.0 for r in GAPS}, seed=0
+    )
+
+    assert set(plain.satisfied) == set(media)
+    assert set(costly.satisfied) == set(media), "it must still grow"
+    assert set(costly.added) <= set(universal.reactions.list_attr("id"))
+    # Cheap evidence should never cost more reactions than no evidence.
+    cheap = gapfill_for_growth(
+        draft, universal, media, weights={r: 0.01 for r in GAPS}, seed=0
+    )
+    assert len(cheap.added) <= len(costly.added)
+
+
+def test_weights_do_not_override_what_is_already_free(draft, universal, media) -> None:
+    """A weight on a draft reaction cannot make it cost something.
+
+    Including a reaction the draft already has is free by definition, so a
+    caller's evidence must not be able to price it back in.
+    """
+    present = next(iter(draft.reactions)).id
+    result = gapfill_for_growth(
+        draft, universal, media, weights={present: 1e6}, seed=0
+    )
+
+    assert set(result.satisfied) == set(media)
+    assert present not in result.added
+
+
+def test_unmentioned_reactions_keep_the_default_weight(universal) -> None:
+    """Partial evidence must not make the rest free, nor unreachable."""
+    from spectra_cobra import TaskEquation
+
+    hydrolysis = {"atp_c": -1.0, "h2o_c": -1.0, "adp_c": 1.0, "pi_c": 1.0, "h_c": 1.0}
+    task = MetabolicTask(
+        id="atp",
+        inputs={m: (0.0, 10.0) for m in ("glc__D_e", "o2_e", "pi_e", "h2o_e", "h_e")},
+        outputs={m: (0.0, 1000.0) for m in ("co2_e", "h2o_e", "h_e")},
+        equations=[TaskEquation(hydrolysis, (1.0, 1000.0))],
+    )
+    draft = universal.copy()
+    draft.remove_reactions(["CYTBD"], remove_orphans=False)
+
+    # Evidence about one unrelated reaction only.
+    result = gapfill_for_tasks(
+        draft, universal, [task], weights={"PGI": 0.5}, seed=0
+    )
+
+    assert tuple(result.satisfied) == ("atp",)

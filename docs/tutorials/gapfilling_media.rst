@@ -169,11 +169,14 @@ the exchanges and anything already added be free:
    for carbon in usable:
        with universal:
            medium(universal, carbon)
+           # Demand growth with a bound on biomass, not by raising tol --
+           # see "Growth is a bound, not a tolerance" below.
+           universal.reactions.get_by_id(BIOMASS).lower_bound = 0.1
            free = (draft_ids | essential | added
                    | {rxn.id for rxn in universal.boundary})
            weights = {rxn.id: (0.0 if rxn.id in free else 1.0)
                       for rxn in universal.reactions}
-           filled = spectra_me(universal, [BIOMASS], tol=0.1, weights=weights,
+           filled = spectra_me(universal, [BIOMASS], tol=1e-4, weights=weights,
                                problem_type="minNetMILP", seed=0)
        new = {rxn.id for rxn in filled.reactions} - draft_ids - added
        if new:
@@ -273,7 +276,7 @@ section on its own:
 
    # 5. Gap-fill, charging nothing for the essential reactions.
    result = gapfill_for_growth(draft, universal, media, min_growth=0.1,
-                               objective_reaction=BIOMASS, tol=0.1,
+                               objective_reaction=BIOMASS, tol=1e-4,
                                free_reactions=sorted(essential), seed=0)
 
    print(f"essential:   {len(essential)} reactions")

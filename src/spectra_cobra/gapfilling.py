@@ -242,6 +242,48 @@ def _rebuild(universal: "Model", keep: Set[str]) -> "Model":
     return subset_model(universal, set(keep), keep_orphan_metabolites=True)
 
 
+def _inclusion_weights(
+    reactions: Iterable["Reaction"],
+    free: Set[str],
+    given: Optional[Mapping[str, float]],
+) -> Dict[str, float]:
+    """What it costs the gap-fill to include each reaction.
+
+    Parameters
+    ----------
+    reactions : iterable of cobra.Reaction
+        The reactions to price, i.e. everything the solve may draw on.
+    free : set of str
+        Reactions that cost nothing: the draft's own, the boundary, and
+        anything the caller declared free.
+    given : mapping of {str: float}, optional
+        The caller's own evidence, keyed by reaction identifier. Expression
+        evidence or a sequence-similarity score belongs here, scaled so that
+        a *lower* number means better supported and so cheaper to add.
+
+    Returns
+    -------
+    dict of {str: float}
+        The weight of every reaction given.
+
+    Notes
+    -----
+    Anything already free stays free whatever `given` says, since including
+    a reaction the draft already has costs nothing by definition. Reactions
+    `given` does not mention keep the default weight of 1, so supplying
+    evidence for part of a universal model neither makes the rest free nor
+    puts it out of reach.
+
+    """
+    given = given or {}
+    return {
+        reaction.id: (
+            0.0 if reaction.id in free else float(given.get(reaction.id, 1.0))
+        )
+        for reaction in reactions
+    }
+
+
 def gapfill_for_growth(
     draft: "Model",
     universal: "Model",
@@ -251,6 +293,7 @@ def gapfill_for_growth(
     tol: float = 1e-4,
     problem_type: str = MIN_NET_MILP,
     free_reactions: Optional[Iterable[str]] = None,
+    weights: Optional[Mapping[str, float]] = None,
     time_limit: Optional[float] = 300.0,
     seed: Optional[int] = None,
 ) -> GapfillResult:
@@ -283,6 +326,17 @@ def gapfill_for_growth(
     free_reactions : iterable of str, optional
         Reactions beyond the draft that cost nothing to include, typically
         those known to be essential for growth in some medium.
+    weights : mapping of {str: float}, optional
+        What it costs to add each reaction, keyed by identifier. This is
+        where evidence goes: expression levels, a sequence-similarity score
+        from the annotation, a curator's confidence. Scale it so a *lower*
+        weight means better supported, since the gap-fill minimises the
+        weighted total and so prefers the cheapest reactions.
+
+        Reactions left out keep the default weight of 1, and the draft's own
+        reactions, the boundary reactions, stay free whatever is passed here, so partial
+        evidence is fine. Pass nothing and every candidate costs the same,
+        which minimises the *number* of reactions added.
     time_limit : float, optional
         Seconds per solve (default 300).
     seed : int, optional
@@ -338,16 +392,13 @@ def gapfill_for_growth(
             _apply_medium(universal, medium)
             if min_growth is not None:
                 universal.reactions.get_by_id(biomass).lower_bound = float(min_growth)
-            weights = {
-                rxn.id: (0.0 if rxn.id in free or rxn.id in added else 1.0)
-                for rxn in universal.reactions
-            }
+            costs = _inclusion_weights(universal.reactions, free | added, weights)
             try:
                 filled = spectra_me(
                     universal,
                     [biomass],
                     tol=tol,
-                    weights=weights,
+                    weights=costs,
                     problem_type=problem_type,
                     time_limit=time_limit,
                     seed=seed,
@@ -397,6 +448,7 @@ def gapfill_for_tasks(
     tol: float = 1e-4,
     problem_type: str = MIN_NET_MILP,
     free_reactions: Optional[Iterable[str]] = None,
+    weights: Optional[Mapping[str, float]] = None,
     essential_reactions: Optional[Iterable[str]] = None,
     core_solve: bool = True,
     repair: bool = True,
@@ -423,6 +475,17 @@ def gapfill_for_tasks(
         one failing task is a small problem, so the exact answer is cheap.
     free_reactions : iterable of str, optional
         Reactions beyond the draft that cost nothing to include.
+    weights : mapping of {str: float}, optional
+        What it costs to add each reaction, keyed by identifier. This is
+        where evidence goes: expression levels, a sequence-similarity score
+        from the annotation, a curator's confidence. Scale it so a *lower*
+        weight means better supported, since the gap-fill minimises the
+        weighted total and so prefers the cheapest reactions.
+
+        Reactions left out keep the default weight of 1, and the draft's own
+        reactions stay free whatever is passed here, so partial
+        evidence is fine. Pass nothing and every candidate costs the same,
+        which minimises the *number* of reactions added.
     essential_reactions : iterable of str, optional
         The reactions essential to the tasks, if you have already computed
         them. Finding them is the expensive part -- 394 s on Human-GEM --
@@ -506,15 +569,13 @@ def gapfill_for_tasks(
     added: Set[str] = set()
 
     if core and core_solve:
-        weights = {
-            rxn.id: (0.0 if rxn.id in free else 1.0) for rxn in universal.reactions
-        }
+        costs = _inclusion_weights(universal.reactions, free, weights)
         try:
             filled = spectra_me(
                 universal,
                 sorted(core),
                 tol=tol,
-                weights=weights,
+                weights=costs,
                 problem_type=problem_type,
                 time_limit=time_limit,
                 seed=seed,
@@ -531,10 +592,9 @@ def gapfill_for_tasks(
                 continue
             present = draft_ids | added
             with task_constraints(universal, result.task) as constrained:
-                weights = {
-                    rxn.id: (0.0 if rxn.id in present else 1.0)
-                    for rxn in constrained.reactions
-                }
+                costs = _inclusion_weights(
+                    constrained.reactions, present, weights
+                )
                 try:
                     # Always mixed-integer here, whatever `problem_type` the
                     # core solve used: repairing one task is a small problem
@@ -543,7 +603,7 @@ def gapfill_for_tasks(
                         constrained,
                         [],
                         tol=tol,
-                        weights=weights,
+                        weights=costs,
                         problem_type=MIN_NET_MILP,
                         time_limit=time_limit,
                         remove_genes=False,
