@@ -418,7 +418,9 @@ def gapfill_for_tasks(
     tol : float, optional
         The minimum flux a core reaction must carry (default 1e-4).
     problem_type : str, optional
-        The formulation (default "minNetMILP").
+        The formulation the core solve uses (default "minNetMILP"). It does
+        not reach the repair step, which is always mixed-integer: repairing
+        one failing task is a small problem, so the exact answer is cheap.
     free_reactions : iterable of str, optional
         Reactions beyond the draft that cost nothing to include.
     essential_reactions : iterable of str, optional
@@ -435,7 +437,8 @@ def gapfill_for_tasks(
         could not express.
     repair : bool, optional
         Whether to follow up task by task on whatever still fails (default
-        True). This is usually necessary, see the notes.
+        True). This is usually necessary, see the notes. The repair solve is
+        always "minNetMILP", whatever `problem_type` was given.
     time_limit : float, optional
         Seconds per solve (default 300).
     seed : int, optional

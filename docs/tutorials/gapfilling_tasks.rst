@@ -265,6 +265,12 @@ Arguments worth knowing
    set was sufficient -- but it is what makes the ``satisfied`` list
    trustworthy in general.
 
+   The repair solve is **always** ``minNetMILP``, whatever ``problem_type``
+   you passed for the core solve. Repairing one failing task is a small
+   problem -- it runs inside that task's own constraints, over what the
+   draft is still missing -- so the exact answer is cheap, and there is
+   nothing to gain by relaxing it to an LP.
+
 ``essential_reactions``
    Pass a core set you have already computed, to avoid paying for it twice.
 
