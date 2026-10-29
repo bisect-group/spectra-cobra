@@ -245,9 +245,16 @@ Arguments worth knowing
 -----------------------
 
 ``problem_type``
-   ``"minNetMILP"`` by default here, unlike :func:`~spectra_cobra.spectra_me`.
-   Gap-filling is usually run once on one draft, and the exact answer is
-   worth the mixed-integer solve. Pass ``"minNetLP"`` if it is too slow.
+   The formulation the **core solve** uses -- the one
+   :func:`~spectra_cobra.spectra_me` runs over the universal model. It is
+   ``"minNetMILP"`` by default here, unlike
+   :func:`~spectra_cobra.spectra_me` itself: gap-filling is usually run once
+   on one draft, and the exact answer is worth the mixed-integer solve. Pass
+   ``"minNetLP"`` if it is too slow.
+
+   It does **not** govern the repair below, which is always mixed-integer
+   whatever you pass here. Repairing one failing task is a small problem, so
+   there is nothing to gain from relaxing it.
 
 ``repair``
    Whether to re-check the tasks afterwards and add what is still missing
@@ -438,7 +445,7 @@ help. Writing the tasks against the cytosolic metabolite, which is what
 Next
 ----
 
-* :doc:`gapfilling_media` — the same idea, with growth in a medium as the
-  requirement instead of a task list
+* :doc:`gapfilling_media` — the same idea, with growth in each of a panel of
+  media as the requirement instead of a task list
 * :doc:`formulations` — what the objectives optimise
 * :doc:`../functions/tasks` — the task API

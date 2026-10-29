@@ -15,6 +15,7 @@ The basic case
 
    model = load_model("textbook")
    consistent = spectra_cc(model, tol=1e-3)
+   print(len(consistent.reactions))
 
    extracted = spectra_me(consistent, core_reactions=["PGI"], tol=1e-3, seed=0)
    print(len(extracted.reactions))
@@ -22,6 +23,7 @@ The basic case
 
 .. code-block:: text
 
+   87
    27
    True
 
