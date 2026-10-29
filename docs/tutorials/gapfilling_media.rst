@@ -10,6 +10,31 @@ carbon sources the organism grows on, your draft reconstruction fails on some
 of them, and you want the smallest set of reactions from a universal model
 that accounts for the difference.
 
+The problem
+-----------
+
+**Minimise** the number of reactions taken from the universal model,
+
+**subject to**
+
+* **the draft is kept** — every reaction it already has stays, and keeping
+  them costs nothing, so only additions are paid for;
+* **mass balance** — at steady state nothing piles up;
+* **a reaction left out carries no flux** — a reaction not added cannot be
+  used in any medium;
+* **each medium is respected** — only what that medium supplies may be taken
+  up;
+* **it grows in every medium** — the biomass reaction carries at least the
+  rate you ask for, in each medium on the panel.
+
+That last one is a **bound** on growth, not a tolerance: you are asking the
+model to grow at a given rate, which is ``min_growth``. `Growth is a bound,
+not a tolerance`_ below is about why the distinction matters.
+
+As with the tasks, tracking one set of fluxes per medium over one shared set
+of on/off switches is a large problem to solve at once. What follows is the
+cheaper route SPECTRA takes: one medium at a time, unioning the additions.
+
 The shape of the problem
 ------------------------
 

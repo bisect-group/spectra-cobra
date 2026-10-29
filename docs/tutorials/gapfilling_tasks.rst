@@ -15,6 +15,34 @@ The difficulty is that "the model must perform this task" is difficult to
 express as a constraint on an extraction. The trick is to turn it into one
 that is not.
 
+The problem
+-----------
+
+**Minimise** the number of reactions taken from the universal model,
+
+**subject to**
+
+* **the draft is kept** — every reaction it already has stays, and keeping
+  them costs nothing, so only additions are paid for;
+* **mass balance** — at steady state nothing piles up;
+* **a reaction left out carries no flux** — a reaction not added cannot be
+  used by any task;
+* **every task is performed** — each one checked in its own conditions, with
+  its inputs and outputs opened and its equations added.
+
+The last two matter together: a task is checked with the reactions the model
+*has*, so the solver cannot satisfy one task using a reaction it declined to
+pay for.
+
+Because only additions are paid for, the answer is "the fewest reactions
+that fix the draft", not "the smallest model that performs the tasks" —
+those are different problems, and the second would be free to throw away
+reactions the draft already had.
+
+Solving this directly means tracking one set of fluxes per task over one
+shared set of on/off switches, which is a large problem. The rest of this
+page is how SPECTRA avoids paying for it.
+
 The trick: tasks become core reactions
 --------------------------------------
 

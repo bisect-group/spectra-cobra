@@ -1,10 +1,26 @@
 Minimal reactomes
 =================
 
-A genome-scale reconstruction is hugely redundant. Most of its reactions are
-not needed to grow on any one carbon source, and a large part of the network
-can be deleted without the model noticing. The **minimal reactome** is the
-smallest set of reactions that still meets a stated requirement.
+A genome-scale reconstruction is hugely redundant, and the redundancy is
+real biology rather than modelling slack: isozymes catalyse the same
+conversion, and parallel pathways reach the same metabolite by different
+routes. The consequence is that no environment uses anything like the whole
+network — most reactions are dispensable on any one carbon source, and a
+large part of the model can be deleted without it noticing. The **minimal
+reactome** is the smallest set of reactions that still meets a stated
+requirement.
+
+Finding it is worth the trouble for several reasons, following Sambamoorthy
+and Raman's MinReact. What survives every environment is a candidate for the
+organism's core metabolism, and what drops out in one medium but not another
+says which capabilities that medium actually demands — so minimal reactomes
+are a way to compare metabolic capability across nutrient conditions rather
+than just to shrink a file. A smaller network is also far easier to analyse:
+interventions, deletion studies and manual curation are all tractable on a
+few hundred reactions and punishing on a few thousand. And metabolic
+engineering often wants exactly this — the simplest chassis that still does
+the job, with the redundancy that would route around an intervention already
+removed.
 
 That question is Burgard, Vaidyaraman and Maranas', from 2001: how few
 reactions does *Escherichia coli* need in order to grow? Their answer was
@@ -21,23 +37,33 @@ still can.
 The problem
 -----------
 
+**Minimise** the number of reactions kept,
+
+**subject to**
+
+* **mass balance** — at steady state nothing piles up: every metabolite is
+  consumed as fast as it is made;
+* **a reaction left out carries no flux** — dropping a reaction has to mean
+  dropping what it does, not merely removing its name;
+* **the medium** — only what the environment supplies may be taken up;
+* **every requirement is met**:
+
+  * grow at a stated rate,
+  * secrete a stated amount,
+  * or perform a stated task.
+
 Minimising a *count* is a mixed-integer problem, so this is
 :func:`~spectra_cobra.spectra_me` with ``problem_type="minNetMILP"``. There
 is no separate solver here: ``minimal_reactome`` builds the problem and hands
-it to the same extraction routine everything else in the package uses. Give
-every reaction a binary :math:`y_j` tied to its flux,
+it to the same extraction routine everything else in the package uses. Each
+reaction gets an on/off switch tied to its flux, so switching it off forces
+its flux to zero, and counting the switches that are on is counting the
+reactions in the network.
 
-.. math::
-
-   \min_y \sum_j w_j y_j
-   \quad\text{s.t.}\quad
-   S v = 0, \quad lb_j\, y_j \le v_j \le ub_j\, y_j
-
-so that :math:`y_j = 0` pins reaction :math:`j` to zero flux and
-:math:`\sum_j y_j` is the size of the network. The requirements do not enter
-as a core set the way they do in :func:`~spectra_cobra.spectra_me`; they enter
-as **bounds**, which is what lets them be a growth rate or a secretion rate
-rather than simply "must carry some flux".
+The requirements do not enter as a core set the way they do in
+:func:`~spectra_cobra.spectra_me`. They enter as **bounds** — "this reaction
+must carry at least this much" — which is what lets a requirement be a growth
+rate or a secretion rate rather than simply "must carry some flux".
 
 There are four kinds of requirement, and you can combine them:
 
@@ -340,17 +366,6 @@ A metabolic task is not another bound on the same flux vector.
 exchanges and opens its own, so every task is a **different environment**, and
 a network that performs two tasks does so with two different flux
 distributions. The reactions are shared; the fluxes are not.
-
-So the problem becomes one flux vector per condition over a single set of
-binaries:
-
-.. math::
-
-   \min_y \sum_j w_j y_j
-   \quad\text{s.t.}\quad
-   S^{(k)} v^{(k)} = 0, \quad
-   lb^{(k)}_j\, y_j \le v^{(k)}_j \le ub^{(k)}_j\, y_j
-   \quad \forall k
 
 This is the "protected functions" idea of NetworkReducer and MinNW: a reduced
 network must preserve not one phenotype but a list of them. Internally the
