@@ -166,7 +166,27 @@ def _has_solution(model: "Model") -> bool:
         value = model.solver.objective.value
     except Exception:  # noqa: BLE001 - see the note above.
         return False
-    return value is not None and not math.isnan(value)
+    if value is None or math.isnan(value):
+        return False
+    # The objective is not enough. optlang reads it with its own try/except
+    # and hands back None on failure, while a variable's primal raises
+    # straight through from the solver -- so the two can disagree, and what
+    # the caller actually reads is the primals. Probe one before promising
+    # the solution can be read at all.
+    try:
+        variables = model.solver.variables
+        if not len(variables):
+            return True
+        variables[0].primal
+    except AttributeError as error:
+        # An interface that does not expose variables at all is not evidence
+        # of a missing solution, so do not read one into it.
+        if "primal" not in str(error).lower() and "'X'" not in str(error):
+            return True
+        return False
+    except Exception:  # noqa: BLE001 - see the note above.
+        return False
+    return True
 
 
 def _included_reactions(

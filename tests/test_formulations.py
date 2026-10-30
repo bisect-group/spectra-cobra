@@ -745,3 +745,40 @@ def test_model_tolerance_is_untouched_when_feasibility_is_waived(
     )
 
     assert toy_model.tolerance == 1e-7
+
+
+def test_a_solution_that_cannot_be_read_is_not_accepted() -> None:
+    """The objective being readable does not mean the primals are.
+
+    optlang reads the objective inside its own try/except and returns None on
+    failure, while a variable's primal raises straight through from the
+    solver, so the two can disagree. Measured on a 104-organism community: a
+    MILP stopped at its time limit reported an objective and then raised
+    AttributeError on the first indicator read, crashing six hours in. The
+    guard must probe what the caller will actually read.
+    """
+
+    class _Variable:
+        @property
+        def primal(self):
+            raise AttributeError("Unable to retrieve attribute 'X'")
+
+    class _Objective:
+        value = 42.0
+
+    class _Solver:
+        objective = _Objective()
+        variables = [_Variable()]
+        status = "time_limit"
+
+    class _Model:
+        solver = _Solver()
+
+    from spectra_cobra.formulations import _check_status, _has_solution
+
+    assert not _has_solution(_Model())
+
+    from spectra_cobra import SpectraError
+
+    with pytest.raises(SpectraError, match="feasible"):
+        _check_status(_Model(), "minNetMILP problem", milp=True)
