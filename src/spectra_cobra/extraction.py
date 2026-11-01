@@ -408,6 +408,7 @@ def _solve_formulation(
     feasibility_tolerance: Optional[float] = DEFAULT_SOLVER_TOLERANCE,
     optimality_tolerance: Optional[float] = DEFAULT_SOLVER_TOLERANCE,
     integrality_tolerance: Optional[float] = DEFAULT_SOLVER_TOLERANCE,
+    warm_start: Optional[Mapping[str, float]] = None,
 ) -> MilpSolution:
     """Dispatch to the requested network inference formulation.
 
@@ -513,6 +514,7 @@ def _solve_formulation(
             feasibility_tolerance=feasibility_tolerance,
             optimality_tolerance=optimality_tolerance,
             integrality_tolerance=integrality_tolerance,
+            warm_start=warm_start,
         )
     return trade_off(
         model,
@@ -527,6 +529,7 @@ def _solve_formulation(
         feasibility_tolerance=feasibility_tolerance,
         optimality_tolerance=optimality_tolerance,
         integrality_tolerance=integrality_tolerance,
+        warm_start=warm_start,
     )
 
 
@@ -851,6 +854,12 @@ def _spectra_me(
                 feasibility_tolerance=feasibility_tolerance,
                 optimality_tolerance=optimality_tolerance,
                 integrality_tolerance=integrality_tolerance,
+                # The direction phase already found a flux distribution that
+                # satisfies the mass balance and the core directions, so it is
+                # a feasible starting point and costs nothing to reuse. The
+                # mixed-integer formulations may find none of their own at
+                # genome or community scale.
+                warm_start=fluxes,
             )
         except SpectraSolverError:
             # Excluding every solution found so far can leave the problem with

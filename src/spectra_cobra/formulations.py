@@ -720,6 +720,7 @@ def min_net_milp(
     feasibility_tolerance: Optional[float] = None,
     optimality_tolerance: Optional[float] = None,
     integrality_tolerance: Optional[float] = MILP_INTEGRALITY_TOLERANCE,
+    warm_start: Optional[Mapping[str, float]] = None,
 ) -> MilpSolution:
     """Extract a model by minimising the weighted reaction count.
 
@@ -885,6 +886,7 @@ def min_net_milp(
             model, feasibility_tolerance, optimality_tolerance,
             integrality_tolerance,
         )
+        _apply_warm_start(model, warm_start, indicators, groups, tol)
 
         model.slim_optimize()
         _check_status(model, "minNetMILP problem", milp=True)
@@ -909,6 +911,7 @@ def trade_off(
     feasibility_tolerance: Optional[float] = None,
     optimality_tolerance: Optional[float] = None,
     integrality_tolerance: Optional[float] = MILP_INTEGRALITY_TOLERANCE,
+    warm_start: Optional[Mapping[str, float]] = None,
 ) -> MilpSolution:
     """Extract a model by maximising the weighted number of reactions kept.
 
@@ -1089,6 +1092,7 @@ def trade_off(
             model, feasibility_tolerance, optimality_tolerance,
             integrality_tolerance,
         )
+        _apply_warm_start(model, warm_start, indicators, one_each, tol)
 
         model.slim_optimize()
         _check_status(model, "tradeOff problem", milp=True)
@@ -1263,6 +1267,85 @@ def _apply_tolerances(
             # module's own cutoff warning included -- would then describe a
             # solver that no longer exists.
             model._tolerance = value
+
+
+def _apply_warm_start(
+    model: "Model",
+    fluxes: Optional[Mapping[str, float]],
+    indicators: Mapping[str, "Variable"],
+    groups: Mapping[str, Iterable[str]],
+    tol: float,
+) -> bool:
+    """Hand the solver a feasible starting point for a mixed-integer solve.
+
+    Parameters
+    ----------
+    model : cobra.Model
+        The model whose solver is about to run.
+    fluxes : mapping of {str: float}, optional
+        A flux distribution to start from, by reaction. None skips this.
+    indicators : mapping of {str: optlang.Variable}
+        The binary of each group.
+    groups : mapping of {str: iterable of str}
+        The reactions each binary governs.
+    tol : float
+        The flux threshold, used to decide which binaries start switched on.
+
+    Returns
+    -------
+    bool
+        Whether a start was given to the solver.
+
+    Notes
+    -----
+    This is what makes the mixed-integer formulations usable at scale. Without
+    a start the solver must find its own first feasible point, and on a
+    community of several hundred thousand reactions it may not find one at
+    all: measured on the 104-organism hCOM community, minNetMILP spent its
+    whole 7200 s limit and returned no solution. With a start it has an
+    incumbent from the outset and the limit improves on it instead.
+
+    The direction phase has already produced a flux distribution satisfying
+    the mass balance and the core directions, so it is feasible by
+    construction and costs nothing to reuse. This is what the MATLAB
+    implementation passes as ``x0``.
+
+    Only some interfaces accept a start, and none of them through optlang, so
+    this reaches for the solver underneath and gives up quietly when that is
+    not possible -- a solve without a start is slower, not wrong.
+
+    """
+    if not fluxes:
+        return False
+    on = {
+        key: any(abs(fluxes.get(rxn_id, 0.0)) >= tol for rxn_id in members)
+        for key, members in groups.items()
+    }
+    try:
+        for key, variable in indicators.items():
+            variable._internal_variable.setAttr("Start", 1.0 if on[key] else 0.0)
+        for reaction in model.reactions:
+            flux = fluxes.get(reaction.id)
+            if flux is None:
+                continue
+            reaction.forward_variable._internal_variable.setAttr(
+                "Start", max(flux, 0.0)
+            )
+            reaction.reverse_variable._internal_variable.setAttr(
+                "Start", max(-flux, 0.0)
+            )
+        model.solver.problem.update()
+    except (AttributeError, TypeError, ValueError) as error:
+        logger.debug(
+            "The %s solver took no warm start: %s", model.problem.__name__, error
+        )
+        return False
+    logger.info(
+        "warm start: %d of %d binaries begin switched on",
+        sum(on.values()),
+        len(on),
+    )
+    return True
 
 
 def _set_time_limit(model: "Model", time_limit: Optional[float]) -> None:

@@ -782,3 +782,57 @@ def test_a_solution_that_cannot_be_read_is_not_accepted() -> None:
 
     with pytest.raises(SpectraError, match="feasible"):
         _check_status(_Model(), "minNetMILP problem", milp=True)
+
+
+def test_the_milp_is_given_a_warm_start(toy_model: Model, solver: str, caplog) -> None:
+    """The direction phase's flux is handed to the solver as a starting point.
+
+    Without one the solver must find its own first feasible solution, and at
+    community scale it may find none at all: on the 104-organism hCOM
+    community minNetMILP spent its whole 7200 s limit and returned nothing.
+    This is what the MATLAB implementation passes as ``x0``.
+    """
+    import logging
+
+    from spectra_cobra import MIN_NET_MILP, spectra_me
+
+    if solver != "gurobi":
+        pytest.skip("only the gurobi interface exposes a starting point")
+
+    with caplog.at_level(logging.INFO, logger="spectra_cobra.formulations"):
+        spectra_me(toy_model, ["R3"], tol=1e-4, problem_type=MIN_NET_MILP, seed=0)
+
+    started = [r for r in caplog.records if "warm start" in r.message]
+    assert started, "the solver should have been given a starting point"
+    assert "binaries begin switched on" in started[0].message
+
+
+def test_a_warm_start_is_optional(toy_model: Model) -> None:
+    """Passing none still solves; it is an accelerator, not a requirement."""
+    kept = min_net_milp(
+        toy_model, {"R5": 1}, _ones(toy_model), 1e-4, warm_start=None
+    )
+
+    assert kept.included
+
+
+def test_a_warm_start_does_not_change_the_answer(toy_model: Model) -> None:
+    """It changes where the solver begins, not what is optimal.
+
+    A start that is feasible but poor must not be mistaken for a solution:
+    the solver should still improve on it.
+    """
+    without = min_net_milp(toy_model, {"R5": 1}, _ones(toy_model), 1e-4)
+    # Every reaction carrying flux: feasible, and far from minimal.
+    everything = {rxn.id: 1.0 for rxn in toy_model.reactions}
+    with_start = min_net_milp(
+        toy_model, {"R5": 1}, _ones(toy_model), 1e-4, warm_start=everything
+    )
+
+    # The toy model has three equivalent pathways to R5, so which one wins is
+    # a tie the solver may break either way. What must not change is the cost
+    # of the answer: a poor starting point must still be improved upon, not
+    # returned.
+    assert len(with_start.included) == len(without.included)
+    assert "R5" in with_start.included
+    assert len(with_start.included) < len(everything)
