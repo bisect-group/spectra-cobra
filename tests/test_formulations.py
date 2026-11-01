@@ -799,7 +799,7 @@ def test_the_milp_is_given_a_warm_start(toy_model: Model, solver: str, caplog) -
     if solver != "gurobi":
         pytest.skip("only the gurobi interface exposes a starting point")
 
-    with caplog.at_level(logging.INFO, logger="spectra_cobra.formulations"):
+    with caplog.at_level(logging.WARNING, logger="spectra_cobra.formulations"):
         spectra_me(toy_model, ["R3"], tol=1e-4, problem_type=MIN_NET_MILP, seed=0)
 
     started = [r for r in caplog.records if "warm start" in r.message]

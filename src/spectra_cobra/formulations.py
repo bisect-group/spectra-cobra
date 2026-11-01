@@ -1316,6 +1316,10 @@ def _apply_warm_start(
 
     """
     if not fluxes:
+        logger.warning(
+            "no warm start: the solver must find its own first feasible "
+            "solution, which it may not manage at this size"
+        )
         return False
     on = {
         key: any(abs(fluxes.get(rxn_id, 0.0)) >= tol for rxn_id in members)
@@ -1336,14 +1340,21 @@ def _apply_warm_start(
             )
         model.solver.problem.update()
     except (AttributeError, TypeError, ValueError) as error:
-        logger.debug(
-            "The %s solver took no warm start: %s", model.problem.__name__, error
+        logger.warning(
+            "the %s solver took no warm start (%s), so it must find its own "
+            "first feasible solution",
+            model.problem.__name__,
+            error,
         )
         return False
-    logger.info(
-        "warm start: %d of %d binaries begin switched on",
+    # Reported at warning level on purpose: whether the solver got a starting
+    # point decides whether a large mixed-integer solve returns anything at
+    # all, and a run that leaves no trace of it cannot be diagnosed afterwards.
+    logger.warning(
+        "warm start: %d of %d binaries begin switched on, from %d fluxes",
         sum(on.values()),
         len(on),
+        len(fluxes),
     )
     return True
 
