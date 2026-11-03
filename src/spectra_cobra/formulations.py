@@ -503,6 +503,50 @@ def _resolve_indicator_groups(
     return {rxn_id: [rxn_id] for rxn_id in chosen}, set(free_ids) - wanted
 
 
+def _absolute_flux_coefficients(
+    model: "Model", rxn_ids: Iterable[str], weights: Mapping[str, float]
+) -> Dict["Variable", float]:
+    """Objective coefficients summing the weighted absolute flux.
+
+    Parameters
+    ----------
+    model : cobra.Model
+        The model being solved.
+    rxn_ids : iterable of str
+        The reactions to charge for.
+    weights : mapping of {str: float}
+        The weight of each reaction. They must be non-negative, which is what
+        makes the sum below equal the weighted L1 norm.
+
+    Returns
+    -------
+    dict of {optlang.Variable: float}
+        The coefficient of each variable.
+
+    Notes
+    -----
+    cobra splits every reaction into non-negative forward and reverse
+    variables with :math:`v = f - r`, so :math:`f + r` bounds :math:`|v|`
+    above, and a minimisation drives that to equality: if both were positive,
+    lowering each by the same amount leaves :math:`v` unchanged and the
+    objective smaller. Summing them therefore minimises the L1 norm directly.
+
+    The obvious alternative -- one auxiliary variable per reaction with
+    :math:`t \ge v` and :math:`t \ge -v` -- is what this used to do, and it
+    is redundant given the split. On the 104-organism hCOM community it meant
+    395463 extra variables and 790926 extra constraints, and building them
+    through optlang took 3 hours 48 minutes before the solver saw anything.
+
+    """
+    coefficients: Dict["Variable", float] = {}
+    for rxn_id in rxn_ids:
+        reaction = model.reactions.get_by_id(rxn_id)
+        weight = float(weights[rxn_id])
+        coefficients[reaction.forward_variable] = weight
+        coefficients[reaction.reverse_variable] = weight
+    return coefficients
+
+
 def _add_absolute_value_vars(
     model: "Model", rxn_ids: List[str], upper_bound: Optional[float] = None
 ) -> Dict[str, "object"]:
@@ -694,11 +738,10 @@ def min_net_lp(
     with model, relaxed_mass_balance(model, steady_state):
         _apply_tolerances(model, feasibility_tolerance, optimality_tolerance)
         apply_direction_bounds(model, directions, signs, tol)
-        abs_vars = _add_absolute_value_vars(model, free_ids)
 
         model.objective = model.problem.Objective(Zero, direction="min")
         model.objective.set_linear_coefficients(
-            {abs_vars[r]: float(weights[r]) for r in free_ids}
+            _absolute_flux_coefficients(model, free_ids, weights)
         )
 
         model.slim_optimize()
@@ -1182,10 +1225,14 @@ def growth_optim(
     with model, relaxed_mass_balance(model, steady_state):
         _apply_tolerances(model, feasibility_tolerance, optimality_tolerance)
         apply_direction_bounds(model, directions, signs, tol)
-        abs_vars = _add_absolute_value_vars(model, penalised_ids)
-
         model.objective = model.problem.Objective(Zero, direction="max")
-        coefficients = {abs_vars[r]: -float(weights[r]) for r in penalised_ids}
+        # Negated: this one maximises, so the penalty is a cost.
+        coefficients = {
+            variable: -weight
+            for variable, weight in _absolute_flux_coefficients(
+                model, penalised_ids, weights
+            ).items()
+        }
         for rxn_id in objective_ids:
             reaction = model.reactions.get_by_id(rxn_id)
             coefficients[reaction.forward_variable] = float(weights[rxn_id])
