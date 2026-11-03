@@ -23,7 +23,7 @@ distribution.
 """
 
 from logging import getLogger
-from typing import TYPE_CHECKING, Dict, Iterable, Optional, Set
+from typing import TYPE_CHECKING, Dict, Iterable, Optional, Sequence, Set
 
 import numpy as np
 from optlang.interface import OPTIMAL
@@ -123,6 +123,189 @@ def _solve(
     return None
 
 
+def build_push_block(
+    model: "Model",
+    rxn_ids: Iterable[str],
+    signs: Dict[str, float],
+    tol: float,
+    reverse: bool,
+    prefix: str = "spectra_aux",
+) -> Dict[str, "object"]:
+    """Add an auxiliary variable and its tying constraint per reaction.
+
+    Parameters
+    ----------
+    model : cobra.Model
+        The model to operate on. Call this inside a ``with model:`` block, so
+        that the additions are reverted afterwards.
+    rxn_ids : iterable of str
+        The reactions to tie an auxiliary variable to, **in the order the
+        objective coefficients will be drawn in**. Callers that care about
+        reproducibility must sort them; see :func:`_push`.
+    signs : dict of {str: float}
+        The orientation of each reaction.
+    tol : float
+        The flux threshold the auxiliary variables are bounded by.
+    reverse : bool
+        Whether the block is for pushing the oriented flux down rather than
+        up, which decides the variable bound and the constraint sense.
+    prefix : str, optional
+        The name prefix of the variables and constraints (default
+        "spectra_aux"). Two blocks resident on one model at once need
+        different prefixes, since the names are keyed by reaction.
+
+    Returns
+    -------
+    dict of {str: optlang.Variable}
+        The auxiliary variable of each reaction.
+
+    Notes
+    -----
+    A block with a zero objective coefficient is **inert**: it neither
+    constrains the flux space nor changes the optimum. For an upward block
+    the constraint reads :math:`z_i \\le \\hat v_i` with :math:`z_i`
+    unbounded below, so :math:`z_i` can always slide down to satisfy it; for
+    a downward block it reads :math:`z_i \\ge \\hat v_i` with :math:`z_i`
+    unbounded above. That is what lets a sweep build both blocks once and
+    switch between them by moving the objective, instead of tearing the
+    block down and rebuilding it every iteration.
+
+    """
+    prob = model.problem
+    aux_vars = []
+    constraints = []
+    by_id: Dict[str, "object"] = {}
+
+    # The constraint is sign_i * v_i - z_i, bounded on one side. Writing that
+    # as an expression makes optlang build it symbolically, and sympy then
+    # dominates the run: 10600 of them cost 19.1 s to construct against 2.3 s
+    # for the same constraints declared empty and filled in by coefficient.
+    # ``v_i`` is itself ``forward - reverse``, so the coefficients are
+    # sign_i on the forward variable, -sign_i on the reverse one, and -1 on
+    # the auxiliary variable.
+    coefficients = []
+    for rxn_id in rxn_ids:
+        reaction = model.reactions.get_by_id(rxn_id)
+        sign = signs[rxn_id]
+
+        if reverse:
+            # z_i >= -tol and v_i <= z_i, minimised: drives v_i down to -tol.
+            # Unbounded above on purpose: a finite bound would silently
+            # bind on a model with large flux bounds.
+            var = prob.Variable(f"{prefix}_{rxn_id}", lb=-tol, ub=None)
+            constraint = prob.Constraint(
+                Zero, name=f"{prefix}_cons_{rxn_id}", ub=0.0
+            )
+        else:
+            # z_i <= tol and v_i >= z_i, maximised: drives v_i up to tol.
+            # Unbounded below on purpose, so that a reaction unable to go
+            # positive merely fails to contribute rather than making the
+            # whole LP infeasible.
+            var = prob.Variable(f"{prefix}_{rxn_id}", lb=None, ub=tol)
+            constraint = prob.Constraint(
+                Zero, name=f"{prefix}_cons_{rxn_id}", lb=0.0
+            )
+        constraints.append(constraint)
+        aux_vars.append(var)
+        by_id[rxn_id] = var
+        coefficients.append(
+            (
+                constraint,
+                {
+                    reaction.forward_variable: sign,
+                    reaction.reverse_variable: -sign,
+                    var: -1.0,
+                },
+            )
+        )
+
+    to_add = aux_vars + constraints
+    model.add_cons_vars(to_add)
+    # The coefficients can only be set once the constraints belong to a
+    # problem.
+    model.solver.update()
+    # Each of these costs two solver updates and four name lookups inside
+    # optlang, so this loop is the expensive part of the whole routine --
+    # which is the reason a sweep should call this once rather than per
+    # iteration.
+    for constraint, terms in coefficients:
+        constraint.set_linear_coefficients(terms)
+    # Reversed so the context rollback deletes the tail of optlang's variable
+    # container first: removing from the front re-indexes everything after it,
+    # which is quadratic in the number of auxiliary variables. This relies on
+    # cobra registering the undo as ``partial(solver.remove, what)`` over the
+    # very list passed in, rather than over a copy of it.
+    to_add.reverse()
+    return by_id
+
+
+def retarget_objective(
+    model: "Model",
+    active: Dict["object", float],
+    desired: Dict["object", float],
+) -> None:
+    """Move the objective onto a different set of auxiliary variables.
+
+    Parameters
+    ----------
+    model : cobra.Model
+        The model whose objective to rewrite.
+    active : dict of {optlang.Variable: float}
+        The coefficients currently in force, **mutated in place** to match
+        `desired`. Pass the same dictionary on every call.
+    desired : dict of {optlang.Variable: float}
+        The coefficients wanted instead.
+
+    Notes
+    -----
+    Only the difference is written: variables that are losing their
+    coefficient are set to zero, and the wanted ones are set outright.
+    Variables outside both sets are untouched, so the cost is proportional to
+    the sets rather than to the model.
+
+    """
+    update: Dict["object", float] = {
+        var: 0.0 for var in active if var not in desired
+    }
+    update.update(desired)
+    if update:
+        model.objective.set_linear_coefficients(update)
+    active.clear()
+    active.update(desired)
+
+
+def draw_weights(
+    block: Dict[str, "object"],
+    rxn_ids: Sequence[str],
+    rng: np.random.Generator,
+) -> Dict["object", float]:
+    """Draw an objective coefficient for each of the given reactions.
+
+    Parameters
+    ----------
+    block : dict of {str: optlang.Variable}
+        The auxiliary variable of each reaction, as returned by
+        :func:`build_push_block`.
+    rxn_ids : sequence of str
+        The reactions to weight, in the order the coefficients are drawn in.
+    rng : numpy.random.Generator
+        The source of the coefficients.
+
+    Returns
+    -------
+    dict of {optlang.Variable: float}
+        The coefficient of each reaction's auxiliary variable, empty when no
+        reactions were given.
+
+    """
+    if not rxn_ids:
+        # Matching the no-op in _push: an empty set draws nothing at all, so
+        # that the random stream does not depend on how the caller got here.
+        return {}
+    weights = rng.uniform(*WEIGHT_RANGE, size=len(rxn_ids))
+    return {block[rxn_id]: weight for rxn_id, weight in zip(rxn_ids, weights)}
+
+
 def _push(
     model: "Model",
     rxn_ids: Iterable[str],
@@ -167,67 +350,13 @@ def _push(
     # identifiers, whose iteration order varies with PYTHONHASHSEED, and that
     # would make a seeded run irreproducible between processes.
     rxn_ids = sorted(rxn_ids)
-    prob = model.problem
-    aux_vars = []
-    constraints = []
-
-    # The constraint is sign_i * v_i - z_i, bounded on one side. Writing that
-    # as an expression makes optlang build it symbolically, and sympy then
-    # dominates the run: 10600 of them cost 19.1 s to construct against 2.3 s
-    # for the same constraints declared empty and filled in by coefficient.
-    # ``v_i`` is itself ``forward - reverse``, so the coefficients are
-    # sign_i on the forward variable, -sign_i on the reverse one, and -1 on
-    # the auxiliary variable.
-    coefficients = []
-    for rxn_id in rxn_ids:
-        reaction = model.reactions.get_by_id(rxn_id)
-        sign = signs[rxn_id]
-
-        if reverse:
-            # z_i >= -tol and v_i <= z_i, minimised: drives v_i down to -tol.
-            # Unbounded above on purpose: a finite bound would silently
-            # bind on a model with large flux bounds.
-            var = prob.Variable(f"spectra_aux_{rxn_id}", lb=-tol, ub=None)
-            constraint = prob.Constraint(
-                Zero, name=f"spectra_aux_cons_{rxn_id}", ub=0.0
-            )
-        else:
-            # z_i <= tol and v_i >= z_i, maximised: drives v_i up to tol.
-            # Unbounded below on purpose, so that a reaction unable to go
-            # positive merely fails to contribute rather than making the
-            # whole LP infeasible.
-            var = prob.Variable(f"spectra_aux_{rxn_id}", lb=None, ub=tol)
-            constraint = prob.Constraint(
-                Zero, name=f"spectra_aux_cons_{rxn_id}", lb=0.0
-            )
-        constraints.append(constraint)
-        aux_vars.append(var)
-        coefficients.append(
-            (
-                constraint,
-                {
-                    reaction.forward_variable: sign,
-                    reaction.reverse_variable: -sign,
-                    var: -1.0,
-                },
-            )
-        )
-
-    to_add = aux_vars + constraints
-    model.add_cons_vars(to_add)
-    # The coefficients can only be set once the constraints belong to a
-    # problem.
-    model.solver.update()
-    for constraint, terms in coefficients:
-        constraint.set_linear_coefficients(terms)
-    # Reversed so the context rollback deletes the tail of optlang's variable
-    # container first: removing from the front re-indexes everything after it,
-    # which is quadratic in the number of auxiliary variables.
-    to_add.reverse()
-    model.objective = prob.Objective(Zero, direction="min" if reverse else "max")
-    if aux_vars:
-        weights = rng.uniform(*WEIGHT_RANGE, size=len(aux_vars))
-        model.objective.set_linear_coefficients(dict(zip(aux_vars, weights)))
+    block = build_push_block(model, rxn_ids, signs, tol, reverse)
+    model.objective = model.problem.Objective(
+        Zero, direction="min" if reverse else "max"
+    )
+    weights = draw_weights(block, rxn_ids, rng)
+    if weights:
+        model.objective.set_linear_coefficients(weights)
 
     # The LP is solved even with no auxiliary variables, because `forward`
     # pins its irreversible reactions through their bounds rather than through
