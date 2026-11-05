@@ -26,6 +26,8 @@ from typing import (
 )
 
 import numpy as np
+from optlang.interface import OPTIMAL
+from optlang.symbolics import Zero
 
 from ._copy import subset_model
 from ._lp import carrying_flux, forward, forward_cc, reverse
@@ -355,6 +357,53 @@ def _settle_core_directions(
             )
 
     return accumulated
+
+
+def _feasible_flux(
+    model: "Model", steady_state: bool
+) -> Optional[Dict[str, float]]:
+    """Return any flux vector the bounds and the mass balance allow.
+
+    Parameters
+    ----------
+    model : cobra.Model
+        The model to solve. Its objective is restored on return.
+    steady_state : bool
+        Whether to enforce ``S v = 0`` rather than ``S v >= 0``.
+
+    Returns
+    -------
+    dict of {str: float} or None
+        The flux through each reaction, or None if the model is infeasible.
+
+    Notes
+    -----
+    This exists for the case of no core reactions, where there is no
+    direction phase to take a warm start from. With nothing to optimise the
+    objective is empty, so the solver only has to find a feasible point --
+    much cheaper than the direction LPs it stands in for, and enough for the
+    mixed-integer formulations, which need a starting point rather than a
+    good one.
+
+    It is worth something only where the bounds already force the behaviour
+    being asked for. On the hCOM community every biomass reaction carries
+    ``lower_bound = 0.1``, so any feasible point already grows every
+    organism, which is exactly what naming them as core would have
+    established.
+
+    """
+    with model, relaxed_mass_balance(model, steady_state):
+        model.objective = model.problem.Objective(Zero, direction="max")
+        model.slim_optimize()
+        if model.solver.status != OPTIMAL:
+            logger.warning(
+                "No feasible flux distribution to start the mixed-integer "
+                "solve from: the solver returned %r. Continuing without a "
+                "warm start.",
+                model.solver.status,
+            )
+            return None
+        return {rxn.id: rxn.flux for rxn in model.reactions}
 
 
 def _directions_from_flux(
@@ -826,17 +875,37 @@ def _spectra_me(
         )
 
         if index == 0 or alt_solution_method == CORE_DIRECTION:
-            with model, relaxed_mass_balance(model, steady_state):
-                fluxes = _settle_core_directions(
-                    model,
-                    core_ids,
-                    signs,
-                    tol,
-                    rng,
-                    swap_order,
-                    core_is_known_live=core_is_known_live,
+            if core_ids:
+                with model, relaxed_mass_balance(model, steady_state):
+                    fluxes = _settle_core_directions(
+                        model,
+                        core_ids,
+                        signs,
+                        tol,
+                        rng,
+                        swap_order,
+                        core_is_known_live=core_is_known_live,
+                    )
+                directions = _directions_from_flux(
+                    model, fluxes or {}, core_ids, signs
                 )
-            directions = _directions_from_flux(model, fluxes or {}, core_ids, signs)
+            else:
+                # Nothing has to be given a direction, so there is nothing
+                # for the direction LPs to settle and every reaction stays
+                # free. A caller gets here deliberately: on a community whose
+                # biomass reactions already carry a positive lower bound,
+                # naming them as core only re-derives the direction their
+                # bounds already force.
+                directions = {}
+                # The mixed-integer formulations still want somewhere to
+                # start, which the direction phase would have supplied. An
+                # objective-free solve gives the same thing for the cost of a
+                # feasibility check.
+                fluxes = (
+                    _feasible_flux(model, steady_state)
+                    if problem_type in MILP_PROBLEM_TYPES
+                    else None
+                )
 
         try:
             solution = _solve_formulation(
