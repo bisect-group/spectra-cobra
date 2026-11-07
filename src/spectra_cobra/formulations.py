@@ -257,7 +257,16 @@ def _warn_on_noisy_support(model: "Model", included: Set[str], tol: float) -> No
     The cause is the gap between `tol` and the solver's tolerance being
     too small for the size of the problem, so the remedy is a larger
     `tol` -- not a different cutoff, which cannot recover information the
-    solution never carried.
+    solution never carried. How much larger is not something this can say
+    in general; raise it until the warning stops and confirm with
+    :func:`check_extraction`.
+
+    The warning does not recommend minNetMILP either, though it used to.
+    That formulation's membership is not read off its binaries alone: it
+    returns the binary-derived set unioned with the same flux-threshold
+    set this warns about. What is true is narrower -- the binary selection
+    is exact, and the flux set only adds to it -- so it cannot produce a
+    model unable to carry flux the way a purely flux-derived one can.
 
     """
     precision = model.tolerance
@@ -272,14 +281,10 @@ def _warn_on_noisy_support(model: "Model", included: Set[str], tol: float) -> No
         "%d of %d reactions in this solution carry less flux than the "
         "solver can resolve (model.tolerance=%.3g), so whether they belong "
         "in the model is not something the solution settles. The extracted "
-        "model may be unable to carry flux at all, core reactions included. "
-        "Raise tol (it is %.3g; ten times that usually suffices at this "
-        "size), or use minNetMILP, whose membership comes from its binaries "
-        "rather than from flux. check_extraction will tell you either way.",
+        "model may be unable to carry flux at all, core reactions included. ",
         noisy,
         len(included),
         precision,
-        tol,
     )
 
 
