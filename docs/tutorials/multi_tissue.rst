@@ -18,12 +18,12 @@ How the pieces are named
 
 Everything a tissue owns is tagged with that tissue's name. A reaction
 ``PGI`` becomes ``PGI__tis1`` in the first tissue and ``PGI__tis2`` in the
-second; the external metabolite ``glc__D_e`` becomes ``glc__D_e__tis1`` and
-``glc__D_e__tis2``. The tag is a ``__`` suffix, which is why tissue names may
+second; the external metabolite ``glc_D[e]`` becomes ``glc_D[e]__tis1`` and
+``glc_D[e]__tis2``. The tag is a ``__`` suffix, which is why tissue names may
 not contain ``__`` themselves.
 
 A pool metabolite is **not** tagged, because it belongs to no tissue: blood
-glucose is ``glc__D_Bl``, one metabolite that every tissue on the blood can
+glucose is ``glc_D_Bl``, one metabolite that every tissue on the blood can
 reach. Between a tissue's own external metabolite and the pool's sits a
 **transport** reaction, one per tissue per metabolite per pool, named
 ``TR_<metabolite>_<pool>__<tissue>``. The pool reaches the outside world
@@ -110,9 +110,9 @@ once, and it is what gives you somewhere to attach a measured uptake rate.
    }
 
 The figure uses short labels to stay readable. In the model you build, those
-nodes are ``glc__D_e__tis1``, ``glc__D_e__tis2``, ``glc__D_e__tis3`` for the
-three tissue copies, ``glc__D_Bl`` and ``glc__D_tis2_tis3`` for the two pools,
-``TR_glc__D_Bl__tis1`` for a transport, and ``EX_glc__D_Bl`` for the exchange.
+nodes are ``glc_D[e]__tis1``, ``glc_D[e]__tis2``, ``glc_D[e]__tis3`` for the
+three tissue copies, ``glc_D_Bl`` and ``glc_D_tis2_tis3`` for the two pools,
+``TR_glc_D_Bl__tis1`` for a transport, and ``EX_glc_D_Bl`` for the exchange.
 
 Building one
 ------------
@@ -161,7 +161,12 @@ meets ``tis2``.
    }
 
 The reference network is Recon3D, 10,600 reactions over 5,835 metabolites.
-:doc:`recon3d` says where to get the file.
+``Recon3DModel_301.mat`` is in the COBRA Toolbox's open model collection, and
+every number on this page was measured against that exact file:
+
+   https://github.com/opencobra/COBRA.models/blob/master/mat/Recon3DModel_301.mat
+
+:doc:`recon3d` covers working with it at genome scale.
 
 .. code-block:: python
 
@@ -185,7 +190,7 @@ The reference network is Recon3D, 10,600 reactions over 5,835 metabolites.
        tissues=["tis1", "tis2", "tis3"],
        pools={"Bl": ["tis1", "tis2"], "tis2_tis3": ["tis2", "tis3"]},
        environment=["Bl"],
-       anchor_reactions={t: "BIOMASS_maintenance"
+       anchor_reactions={t: "biomass_maintenance"
                          for t in ("tis1", "tis2", "tis3")},
        pool_medium=blood,
        couple=False,
@@ -218,7 +223,7 @@ builder will not guess, because guessing "all of them" would give the
 ``tis2_tis3`` interface its own exchanges and let those two tissues feed
 themselves from outside, bypassing the blood entirely.
 
-``anchor_reactions`` names ``BIOMASS_maintenance``. A tissue is not growing,
+``anchor_reactions`` names ``biomass_maintenance``. A tissue is not growing,
 so there is no biomass reaction to find and the anchor has to be said rather
 than guessed. Recon3D's maintenance biomass is the natural choice: it is what
 the tissue must keep doing to stay alive.
@@ -251,9 +256,9 @@ different sources — hand over one per tissue instead, in the same order:
        tissues=["liver", "muscle", "adipose"],
        pools={"Bl": ["liver", "muscle", "adipose"]},
        environment=["Bl"],
-       anchor_reactions={"liver": "BIOMASS_maintenance",
-                         "muscle": "BIOMASS_maintenance",
-                         "adipose": "BIOMASS_maintenance"},
+       anchor_reactions={"liver": "biomass_maintenance",
+                         "muscle": "biomass_maintenance",
+                         "adipose": "biomass_maintenance"},
    )
 
 Everything else is unchanged. Giving one model costs no more memory than a
@@ -271,7 +276,7 @@ that is not doing what you think looks exactly like one that is:
 .. code-block:: python
 
    body.model.objective = body.model.reactions.get_by_id(
-       "BIOMASS_maintenance__tis3")
+       "biomass_maintenance__tis3")
    print(f"tis3 alone:               {body.model.slim_optimize():.4f}")
 
    with body.model:
@@ -292,11 +297,12 @@ reason is worth knowing.
 .. warning::
 
    **A human reconstruction ships with taps no pool controls.** Recon3D has
-   246 boundary reactions that are not named ``EX_``: 145 demands (``DM_``)
-   and 101 sinks (``SK_``), of which 95 have a negative lower bound, meaning
-   they supply a metabolite from nothing. They sit *inside* the cell, so
-   tagging gives every tissue its own — ``SK_crvnc_c__tis3`` is an open tap
-   in ``tis3`` that neither blood nor the interface governs.
+   247 boundary reactions that are not named ``EX_``: 151 demands (``DM_``)
+   and 96 sinks (``sink_``). Every one of the 96 sinks has a negative lower
+   bound, meaning it supplies a metabolite from nothing; none of the demands
+   does. They sit *inside* the cell, so tagging gives every tissue its own —
+   ``sink_crvnc[c]__tis3`` is an open tap in ``tis3`` that neither blood nor
+   the interface governs.
 
    That floor of 150.87 is what those sinks provide. Close them and the same
    body behaves as the figure claims:
@@ -315,7 +321,7 @@ reason is worth knowing.
         - 755.0032
         - 755.0032
         - 150.8679
-      * - 95 supplying sinks closed
+      * - 96 supplying sinks closed
         - 684.3324
         - **684.5431**
         - 684.3324
@@ -336,7 +342,7 @@ reason is worth knowing.
    .. code-block:: python
 
       for rxn in gem.reactions:
-          if rxn.id.startswith(("DM_", "SK_")) and rxn.lower_bound < 0:
+          if rxn.id.startswith(("DM_", "SK_", "sink_")) and rxn.lower_bound < 0:
               rxn.lower_bound = 0.0
 
 Where each tissue's inputs come from
@@ -387,7 +393,7 @@ the union of each tissue's core reactions, tagged:
    from spectra_cobra import spectra_me, check_extraction
 
    # One reaction per tissue here; from transcriptomics it would be many.
-   core = [f"BIOMASS_maintenance__{t}" for t in ("tis1", "tis2", "tis3")]
+   core = [f"biomass_maintenance__{t}" for t in ("tis1", "tis2", "tis3")]
    extracted = spectra_me(body.model, core, tol=1e-4,
                           problem_type="minNetLP", seed=0)
 
@@ -400,9 +406,9 @@ the union of each tissue's core reactions, tagged:
 
 .. code-block:: text
 
-   362 reactions
-     tis1 97   tis2 117   tis3 128
-     <ExtractionReport 362 reactions, 0 core missing, 0 blocked (0 of them core), valid=True>
+   357 reactions
+     tis1 97   tis2 115   tis3 125
+     <ExtractionReport 357 reactions, 0 core missing, 0 blocked (0 of them core), valid=True>
 
 ``decompose`` splits the extracted body back into one model per tissue, each
 untagged and standing on its own, with an exchange reaction wherever it met a
@@ -438,7 +444,7 @@ only the check distinguishes them.
    that can be said in general — raise it until the warning stops, and
    confirm with :func:`~spectra_cobra.check_extraction`.
 
-   The three-tissue body above does not trigger it at ``tol=1e-4``: all 362
+   The three-tissue body above does not trigger it at ``tol=1e-4``: all 357
    reactions carry flux the solver can resolve, and the result verifies.
    Larger bodies, more tissues and larger cores all make it more likely.
 
@@ -454,7 +460,7 @@ only what lets one solve cover three tissues while keeping each tissue's
 flux its own.
 
 ``problem_type`` is equally free. ``minNetLP`` is used above because it is
-cheap — one LP, 146 s on this 35,015-reaction body — but it is one of four,
+cheap — one LP, 29 s on this 35,015-reaction body — but it is one of four,
 and they ask genuinely different questions rather than rounding one answer
 four ways:
 
