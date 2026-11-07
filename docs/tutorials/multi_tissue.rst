@@ -1,41 +1,45 @@
 Multi-tissue models
 ===================
 
-Tissues of a body are built exactly as the organisms of a community are: one
-tagged copy of the reference network per tissue, meeting in pools. Everything
-in :doc:`community` about pools, tagging, exchangeable metabolites and
-coupling applies here unchanged, and this page assumes it.
+A multi-tissue model is several copies of a metabolic network, one per
+tissue, joined by the places they exchange metabolites: blood, an interstitial
+space, the gut lumen. Each tissue keeps its own copy of every reaction and
+every metabolite, so the same reaction running in liver and in muscle is two
+separate reactions carrying separate flux. What connects them is a **pool** —
+a compartment several tissues can reach — and what distinguishes them is
+their bounds, which pools they reach, and which reactions they are required
+to keep.
 
-Three things differ in practice, and all three come from the fact that a
-tissue is not an organism:
+This page builds one from Recon3D and extracts context-specific tissues from
+it. Nothing here assumes you have read anything else.
 
-* **Every tissue is a copy of the same network.** What distinguishes them is
-  their bounds, their core reactions and which pool they can reach, so
-  :func:`~spectra_cobra.build_multi_tissue_model` takes one model and a list
-  of names rather than a list of models.
-* **A tissue is rarely growing.** There is no biomass reaction to find, so
-  the anchor that coupling gates on has to be named — usually maintenance or
-  a demand reaction.
-* **The topology is rarely one pool.** Blood reaches some tissues; others
-  meet only each other. That is what ``pools`` and ``environment`` are for.
+How the pieces are named
+------------------------
 
-A multi-tissue model
---------------------
+Everything a tissue owns is tagged with that tissue's name. A reaction
+``PGI`` becomes ``PGI__tis1`` in the first tissue and ``PGI__tis2`` in the
+second; the external metabolite ``glc__D_e`` becomes ``glc__D_e__tis1`` and
+``glc__D_e__tis2``. The tag is a ``__`` suffix, which is why tissue names may
+not contain ``__`` themselves.
 
-Tissues need the ``"pooled"`` mode, for two reasons: they do not all meet in
-the same place, and measured uptake rates attach to the transports.
+A pool metabolite is **not** tagged, because it belongs to no tissue: blood
+glucose is ``glc__D_Bl``, one metabolite that every tissue on the blood can
+reach. Between a tissue's own external metabolite and the pool's sits a
+**transport** reaction, one per tissue per metabolite per pool, named
+``TR_<metabolite>_<pool>__<tissue>``. The pool reaches the outside world
+through an **exchange**, ``EX_<metabolite>_<pool>``.
 
-What ``"pooled"`` builds is a private external compartment per tissue and a
-transport reaction from it into each pool that tissue reaches. That is what
-lets one tissue belong to more than one pool at once:
+That arrangement — a private external compartment per tissue, and a transport
+into each pool it reaches — is what lets one tissue belong to two pools at
+once, and it is what gives you somewhere to attach a measured uptake rate.
 
 .. graphviz::
-   :caption: ``mode="pooled"``, with two pools. ``B`` is in both, and can be
-             because it keeps its own ``glc[e]`` and runs a separate
-             transport into each. ``u1`` reaches the environment; ``u2`` is an
-             interface between ``B`` and ``C`` and stays closed. Each ``TR_``
-             belongs to one tissue, which is what ``link_bounds`` attaches a
-             measured rate to.
+   :caption: Three tissues and two pools. ``tis2`` is in both, and can be
+             because it keeps its own copy of glucose and runs a separate
+             transport into each pool. ``Bl`` reaches the environment;
+             the ``tis2``/``tis3`` interface does not. Every ``TR_``
+             belongs to exactly one tissue, which is what lets a measured
+             rate attach to it.
    :align: center
 
    digraph pooled {
@@ -45,27 +49,27 @@ lets one tissue belong to more than one pool at once:
      edge [fontname="Helvetica", fontsize=9, color="#6b7280", arrowsize=0.7];
 
      subgraph cluster_a {
-       label="tissue A"; labeljust=l; fontname="Helvetica"; fontsize=9;
+       label="tis1"; labeljust=l; fontname="Helvetica"; fontsize=9;
        fontcolor="#3c6997"; color="#c7d6e8"; style="rounded,filled";
        fillcolor="#f6f9fd"; margin=10;
-       glcA [label="glc[e]", shape=ellipse, style=filled, fillcolor="#e8f0fa",
+       glcA [label="glc_t1", shape=ellipse, style=filled, fillcolor="#e8f0fa",
              color="#3c6997", fontcolor="#1b3a57"];
-       trA1 [label="TR_glc_u1", shape=box, style="filled,rounded", width=1.0,
+       trA1 [label="TR_t1_Bl", shape=box, style="filled,rounded", width=1.0,
              height=0.26, fillcolor="#ffffff", color="#3c6997",
              fontcolor="#1b3a57"];
        glcA -> trA1 [dir=both];
      }
 
      subgraph cluster_b {
-       label="tissue B  —  in both pools"; labeljust=l; fontname="Helvetica";
+       label="tis2  —  in both pools"; labeljust=l; fontname="Helvetica";
        fontsize=9; fontcolor="#b3411f"; color="#e2bfaf";
        style="rounded,filled"; fillcolor="#fdf6f3"; margin=10;
-       glcB [label="glc[e]", shape=ellipse, style=filled, fillcolor="#e8f0fa",
+       glcB [label="glc_t2", shape=ellipse, style=filled, fillcolor="#e8f0fa",
              color="#3c6997", fontcolor="#1b3a57"];
-       trB1 [label="TR_glc_u1", shape=box, style="filled,rounded", width=1.0,
+       trB1 [label="TR_t2_Bl", shape=box, style="filled,rounded", width=1.0,
              height=0.26, fillcolor="#ffffff", color="#3c6997",
              fontcolor="#1b3a57"];
-       trB2 [label="TR_glc_u2", shape=box, style="filled,rounded", width=1.0,
+       trB2 [label="TR_t2_if", shape=box, style="filled,rounded", width=1.0,
              height=0.26, fillcolor="#ffffff", color="#3c6997",
              fontcolor="#1b3a57"];
        glcB -> trB1 [dir=both];
@@ -73,22 +77,22 @@ lets one tissue belong to more than one pool at once:
      }
 
      subgraph cluster_c {
-       label="tissue C"; labeljust=l; fontname="Helvetica"; fontsize=9;
+       label="tis3"; labeljust=l; fontname="Helvetica"; fontsize=9;
        fontcolor="#3c6997"; color="#c7d6e8"; style="rounded,filled";
        fillcolor="#f6f9fd"; margin=10;
-       glcC [label="glc[e]", shape=ellipse, style=filled, fillcolor="#e8f0fa",
+       glcC [label="glc_t3", shape=ellipse, style=filled, fillcolor="#e8f0fa",
              color="#3c6997", fontcolor="#1b3a57"];
-       trC2 [label="TR_glc_u2", shape=box, style="filled,rounded", width=1.0,
+       trC2 [label="TR_t3_if", shape=box, style="filled,rounded", width=1.0,
              height=0.26, fillcolor="#ffffff", color="#3c6997",
              fontcolor="#1b3a57"];
        glcC -> trC2 [dir=both];
      }
 
-     u1 [label="glc_u1", shape=ellipse, style=filled, fillcolor="#fdf0e3",
+     u1 [label="glc_Bl", shape=ellipse, style=filled, fillcolor="#fdf0e3",
          color="#c07d2a", fontcolor="#6b4411", penwidth=1.6];
-     u2 [label="glc_u2", shape=ellipse, style=filled, fillcolor="#fdf0e3",
+     u2 [label="glc_if", shape=ellipse, style=filled, fillcolor="#fdf0e3",
          color="#c07d2a", fontcolor="#6b4411", penwidth=1.6];
-     ex [label="EX_glc_u1", shape=box, style="filled,rounded", width=1.0,
+     ex [label="EX_glc_Bl", shape=box, style="filled,rounded", width=1.0,
          height=0.26, fillcolor="#ffffff", color="#c07d2a",
          fontcolor="#6b4411"];
      env [label="environment", shape=plaintext, fontcolor="#9ca3af",
@@ -105,19 +109,21 @@ lets one tissue belong to more than one pool at once:
      u2 -> shut [dir=none, style=dotted, color="#d8b2a6"];
    }
 
-A community is normally built the other way, with ``mode="shared"``: one
-external compartment for everyone, no transports, and therefore exactly one
-pool. :doc:`community` has that figure. The trade is size — one transport
-per tissue per metabolite is affordable across five tissues and is not
-across a hundred organisms.
+The figure uses short labels to stay readable. In the model you build, those
+nodes are ``glc__D_e__tis1``, ``glc__D_e__tis2``, ``glc__D_e__tis3`` for the
+three tissue copies, ``glc__D_Bl`` and ``glc__D_tis2_tis3`` for the two pools,
+``TR_glc__D_Bl__tis1`` for a transport, and ``EX_glc__D_Bl`` for the exchange.
 
-Suppose three tissues. ``tis1`` and ``tis2`` are perfused by blood; ``tis3``
-only ever meets ``tis2``:
+Building one
+------------
+
+Three tissues. ``tis1`` and ``tis2`` are perfused by blood; ``tis3`` only ever
+meets ``tis2``.
 
 .. graphviz::
    :caption: Two pools. ``Bl`` reaches the environment; the ``tis2_tis3``
-             interface does not, so ``tis3`` lives entirely on what
-             ``tis2`` passes it.
+             interface does not, so ``tis3`` lives on what ``tis2``
+             passes it.
    :align: center
 
    digraph tissues {
@@ -154,26 +160,34 @@ only ever meets ``tis2``:
      { rank=same; ex; shut; }
    }
 
+The reference network is Recon3D, 10,600 reactions over 5,835 metabolites.
+:doc:`recon3d` says where to get the file.
+
 .. code-block:: python
 
-   from cobra.io import load_model
+   from cobra.io import load_matlab_model
    from spectra_cobra import build_multi_tissue_model
 
-   # The reference network, and the two sets of bounds the body is built with.
-   # Substitute your own: ``pool_medium`` is what the blood offers, and
-   # ``link_bounds`` what may cross between a tissue and a pool.
-   gem = load_model("iJO1366")   # or Recon3D, converted -- see :doc:`recon3d`
-   blood_medium = {"glc__D_e": (-1.0, 1000.0), "o2_e": (-1000.0, 1000.0)}
-   measured_rates = {"glc__D_e": (-0.5, 1000.0)}
+   gem = load_matlab_model("Recon3DModel_301.mat")
+
+   # What the blood carries. Recon3D ships with all of its exchanges open,
+   # so this says the blood offers everything the reconstruction knows how
+   # to take up. Narrow it to the metabolites your blood actually carries
+   # when you have that measurement -- but narrow it deliberately, because
+   # a human tissue starves on a medium that an E. coli model would be
+   # perfectly happy with.
+   blood = {next(iter(r.metabolites)).id: (-1000.0, 1000.0)
+            for r in gem.reactions
+            if r.id.startswith("EX_") and len(r.metabolites) == 1}
 
    body = build_multi_tissue_model(
        gem,
        tissues=["tis1", "tis2", "tis3"],
        pools={"Bl": ["tis1", "tis2"], "tis2_tis3": ["tis2", "tis3"]},
        environment=["Bl"],
-       anchor_reactions={t: "ATPM" for t in ("tis1", "tis2", "tis3")},
-       pool_medium=blood_medium,
-       link_bounds=measured_rates,
+       anchor_reactions={t: "BIOMASS_maintenance"
+                         for t in ("tis1", "tis2", "tis3")},
+       pool_medium=blood,
        couple=False,
    )
 
@@ -188,64 +202,76 @@ only ever meets ``tis2``:
 
 .. code-block:: text
 
-   8397 reactions, 6063 metabolites
-     pool Bl: ['tis1', 'tis2'], 324 metabolites
-     pool tis2_tis3: ['tis2', 'tis3'], 324 metabolites
-     community exchanges: 324
-     transports: 1296
+   35015 reactions, 20663 metabolites
+     pool Bl: ['tis1', 'tis2'], 1579 metabolites
+     pool tis2_tis3: ['tis2', 'tis3'], 1579 metabolites
+     community exchanges: 1579
+     transports: 6316
 
-*E. coli* standing in for a tissue is biologically odd, but the structure is
-the point and it loads anywhere. 1296 is 324 x 2 for the blood plus 324 x 2
-for the interface; the 324 exchanges are all on ``Bl``, because that is the
-only pool nominated.
+6,316 is 1,579 × 2 for the blood plus 1,579 × 2 for the interface. The 1,579
+exchanges are all on ``Bl``, because that is the only pool nominated.
 
 Four things to notice.
 
-``environment=["Bl"]`` is required, not optional. With more than one pool
-the builder will not guess, because guessing "all of them" would give the
-``tis2_tis3`` interface its own exchanges and let those two tissues bypass
-the blood entirely.
+``environment=["Bl"]`` is required, not optional. With more than one pool the
+builder will not guess, because guessing "all of them" would give the
+``tis2_tis3`` interface its own exchanges and let those two tissues feed
+themselves from outside, bypassing the blood entirely.
 
-``anchor_reactions`` names ATP maintenance. A tissue is not growing, so
-there is no biomass reaction to find.
+``anchor_reactions`` names ``BIOMASS_maintenance``. A tissue is not growing,
+so there is no biomass reaction to find and the anchor has to be said rather
+than guessed. Recon3D's maintenance biomass is the natural choice: it is what
+the tissue must keep doing to stay alive.
 
-``link_bounds`` is where blood metabolomics goes. It bounds the transport
-between a tissue and a pool — *this tissue may take up at most this much* —
-which is a different statement from ``pool_medium``, which says what the
-blood contains at all.
+``couple=False`` here. Coupling ties a tissue's reactions to its anchor, so
+that nothing runs in a tissue that is not maintaining itself. With an anchor
+running at maintenance rates the default coupling factor would throttle every
+tissue, so either raise it to suit the anchor or leave the coupling off.
+Build it, read ``coupling_summary()``, and decide with the numbers in front
+of you.
 
-``couple=False`` here. With an anchor running at maintenance rates the
-default :math:`c` would throttle every tissue; either raise :math:`c` to
-suit the anchor or leave the coupling off. Build it, read
-``coupling_summary()``, and decide with the numbers in front of you.
+``pool_medium`` is what the pool contains at all. It is a different statement
+from ``link_bounds``, which bounds a single tissue's transport into a pool —
+*this* tissue may take up at most this much. Blood metabolomics goes in the
+first; measured per-tissue uptake rates go in the second.
 
-The reference network is read, never modified, and never copied: the same
-model is handed over once per tissue, so a five-tissue human model costs no
-more memory than a one-tissue one.
+Tissues that are not copies of each other
+-----------------------------------------
 
-What that comes to, on a real reconstruction
---------------------------------------------
-
-Four tissues on a consistent Recon3D, three on the blood and a fourth
-reachable only through the third:
-
-.. code-block:: text
-
-   body: 36180 reactions, 20552 metabolites        (28s)
-     pool Bl:        ['tis1', 'tis2', 'tis3'], 880 metabolites
-     pool tis3_tis4: ['tis3', 'tis4'],         880 metabolites
-     community exchanges: 880
-     transports:         4400
-
-4,400 is 880 × 3 for the blood plus 880 × 2 for the interface. The 880
-exchanges are all on ``Bl``, because that is the only pool nominated.
-
-The test that the topology is really doing something, on the *E. coli* body
-built above — where ``tis3`` is the tissue reachable only through ``tis2``:
+Above, every tissue starts as a copy of one reconstruction, which is the
+usual case: what makes liver differ from muscle is its bounds and its core
+reactions, not a different reaction database. When the tissues really are
+different networks — already context-specific models, say, or models from
+different sources — hand over one per tissue instead, in the same order:
 
 .. code-block:: python
 
-   body.model.objective = body.model.reactions.get_by_id("ATPM__tis3")
+   body = build_multi_tissue_model(
+       [liver_model, muscle_model, adipose_model],
+       tissues=["liver", "muscle", "adipose"],
+       pools={"Bl": ["liver", "muscle", "adipose"]},
+       environment=["Bl"],
+       anchor_reactions={"liver": "BIOMASS_maintenance",
+                         "muscle": "BIOMASS_maintenance",
+                         "adipose": "BIOMASS_maintenance"},
+   )
+
+Everything else is unchanged. Giving one model costs no more memory than a
+one-tissue model would: the builder reads its inputs and never modifies them,
+so the same object is handed over once per tissue rather than copied.
+
+Does the topology actually bite?
+--------------------------------
+
+``tis3`` touches no open pool. Everything it gets should arrive through the
+interface from ``tis2``, so shutting ``tis2`` down should cost ``tis3``
+everything. Testing that is worth the two lines it takes, because a topology
+that is not doing what you think looks exactly like one that is:
+
+.. code-block:: python
+
+   body.model.objective = body.model.reactions.get_by_id(
+       "BIOMASS_maintenance__tis3")
    print(f"tis3 alone:               {body.model.slim_optimize():.4f}")
 
    with body.model:
@@ -256,17 +282,98 @@ built above — where ``tis3`` is the tissue reachable only through ``tis2``:
 
 .. code-block:: text
 
-   tis3 alone:               17.2000
-   tis3 with tis2 shut down: 0.0000
+   tis3 alone:               755.0032
+   tis3 with tis2 shut down: 150.8679
 
-``tis3`` touches no open pool, so everything it eats comes through the
-interface from ``tis2``. Shut ``tis2`` down and ``tis3`` goes to exactly
-zero. Had the interface been given exchanges of its own — which is what
-defaulting ``environment`` to every pool would have done — ``tis3`` would
-have carried on regardless and nothing would have looked wrong.
+Shutting ``tis2`` down costs ``tis3`` four fifths of its maintenance capacity,
+which is the interface doing its job. But it does not cost everything, and the
+reason is worth knowing.
 
-The Recon3D figures above show the same structure at genome scale, where
-``tis4`` stands in the position ``tis3`` holds here.
+.. warning::
+
+   **A human reconstruction ships with taps no pool controls.** Recon3D has
+   246 boundary reactions that are not named ``EX_``: 145 demands (``DM_``)
+   and 101 sinks (``SK_``), of which 95 have a negative lower bound, meaning
+   they supply a metabolite from nothing. They sit *inside* the cell, so
+   tagging gives every tissue its own — ``SK_crvnc_c__tis3`` is an open tap
+   in ``tis3`` that neither blood nor the interface governs.
+
+   That floor of 150.87 is what those sinks provide. Close them and the same
+   body behaves as the figure claims:
+
+   .. list-table::
+      :header-rows: 1
+      :widths: 34 16 16 16 18
+
+      * - sinks
+        - ``tis1``
+        - ``tis2``
+        - ``tis3``
+        - ``tis3``, ``tis2`` shut
+      * - as Recon3D ships them
+        - 755.0032
+        - 755.0032
+        - 755.0032
+        - 150.8679
+      * - 95 supplying sinks closed
+        - 684.3324
+        - **684.5431**
+        - 684.3324
+        - **0.0000**
+
+   The second row is the more interesting one. With the sinks open all three
+   tissues read an identical 755.0032: whether a tissue sits on one pool or
+   two makes no difference, because the sinks dominate. Closed, ``tis2``
+   separates out — 684.5431 against 684.3324 — and that small margin is
+   exactly the advantage of being the only tissue on both pools. The sinks do
+   not merely soften the result; they erase the structural signal the model
+   was built to express, while leaving a number that looks perfectly
+   reasonable.
+
+   Closing them is one line, and whether to is a modelling decision rather
+   than a default:
+
+   .. code-block:: python
+
+      for rxn in gem.reactions:
+          if rxn.id.startswith(("DM_", "SK_")) and rxn.lower_bound < 0:
+              rxn.lower_bound = 0.0
+
+Where each tissue's inputs come from
+-------------------------------------
+
+A multi-tissue model has four inputs, and in real work each comes from a
+different measurement.
+
+**The pool medium** is what the blood carries, from blood metabolomics. It
+sets what is available at all. Above it is left wide open, which keeps the
+page about topology — but a wide-open blood is a strong assumption, and
+narrowing it is usually the first thing to do with real data.
+
+**The link bounds** are what each tissue may draw from a pool, from measured
+per-tissue uptake and secretion rates. ``link_bounds`` attaches them to the
+transports, which is why the builder makes one transport per tissue rather
+than letting tissues share.
+
+**The anchor** is what each tissue must keep doing. Maintenance biomass, or
+ATP maintenance, or a demand reaction for a product the tissue is known to
+export.
+
+**The core reactions** are what each tissue is known to be running, and this
+is where transcriptomics goes. The usual route is to call a gene present or
+absent from expression, map genes to reactions through the model's GPR rules,
+and take the reactions whose rules are satisfied as that tissue's core. Those
+reaction identifiers are then tagged with the tissue's name — ``PGI__tis1`` —
+and the tagged sets from every tissue are concatenated into one core list for
+the whole body.
+
+.. note::
+
+   The example below uses each tissue's maintenance reaction as its core,
+   chosen by hand. That keeps the page about the mechanics. In real work the
+   core comes from expression data as described above, and it is a great deal
+   larger: a few hundred to a few thousand reactions per tissue rather than
+   one. The extraction call does not change — only the contents of ``core``.
 
 Extracting context-specific tissues
 -----------------------------------
@@ -277,107 +384,125 @@ the union of each tissue's core reactions, tagged:
 
 .. code-block:: python
 
-   from spectra_cobra import spectra_me
+   from spectra_cobra import spectra_me, check_extraction
 
-   # ATP maintenance in every tissue. On a human reconstruction a maintenance
-   # biomass reaction would sit alongside it in each tissue's core.
-   core = [f"ATPM__{tissue}" for tissue in ("tis1", "tis2", "tis3")]
-   extracted = spectra_me(body.model, core, tol=1e-4, problem_type="minNetLP",
-                          seed=0)
+   # One reaction per tissue here; from transcriptomics it would be many.
+   core = [f"BIOMASS_maintenance__{t}" for t in ("tis1", "tis2", "tis3")]
+   extracted = spectra_me(body.model, core, tol=1e-4,
+                          problem_type="minNetLP", seed=0)
 
    tissues = body.with_model(extracted).decompose()
 
    print(f"{len(extracted.reactions)} reactions")
    print("  " + "   ".join(f"{name} {len(model.reactions)}"
                            for name, model in tissues.items()))
-   kept = {rxn.id for rxn in extracted.reactions}
-   print(f"  core kept: {sum(c in kept for c in core)}/{len(core)}")
+   print(f"  {check_extraction(extracted, core, tol=1e-4)}")
 
 .. code-block:: text
 
-   113 reactions
-     tis1 35   tis2 39   tis3 35
-     core kept: 3/3
+   362 reactions
+     tis1 97   tis2 117   tis3 128
+     <ExtractionReport 362 reactions, 0 core missing, 0 blocked (0 of them core), valid=True>
 
-``decompose`` splits the extracted body back into one model per tissue. The
-tissues differ because they reach different pools: ``tis2`` is on both the
-blood and the interface and carries the most.
+``decompose`` splits the extracted body back into one model per tissue, each
+untagged and standing on its own, with an exchange reaction wherever it met a
+pool — a transport with the pool side dropped *is* an exchange, and it keeps
+the transport's bounds, so measured rates survive the round trip.
 
-On the four-tissue body above, with ATP maintenance and a maintenance
-biomass reaction core in every tissue:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 22 10 16 14 38
-
-   * - Formulation
-     - ``tol``
-     - Reactions
-     - Time
-     - :func:`~spectra_cobra.check_extraction`
-   * - ``minNetLP``
-     - 1e-4
-     - 2,596
-     - 881s
-     - **fails**: 2,292 blocked, 5 of them core
-   * - ``minNetLP``
-     - 1e-3
-     - 894
-     - 948s
-     - passes
-   * - ``minNetMILP``
-     - 1e-4
-     - **420**
-     - 4,140s
-     - passes
+Always run :func:`~spectra_cobra.check_extraction`. A core reaction being
+*present* in the result is not the same as its being able to carry flux, and
+only the check distinguishes them.
 
 .. warning::
 
-   ``minNetLP`` needs a larger ``tol`` here than a single organism does,
-   and the usual 1e-4 is not enough. At that value it returned a model
-   holding all eight core reactions and unable to carry flux through
-   seven of them -- and only :func:`~spectra_cobra.check_extraction` says
-   so, because a core reaction being *present* is not the same as its
-   working.
+   ``minNetLP`` infers which reactions it kept from which ones carry flux in
+   its solution. That inference is sound only while the fluxes mean
+   something. The objective pushes every reaction as low as the constraints
+   allow, and on a large body a share of them can end up carrying less than
+   the solver's own feasibility tolerance — numbers it cannot distinguish
+   from zero. Reactions kept on that evidence may leave the extracted model
+   unable to carry flux at all, core reactions included.
 
-   The reason is that an LP infers which reactions it kept from which
-   ones carry flux, and a forced core flux of 1e-4 sits only five orders
-   of magnitude above a solver tolerance of 1e-9. On a body this size the
-   objective drives half the solution into that gap: **645 of the 1,269
-   reactions it kept carried less flux than the solver can resolve**, and
-   1,267 of them turned out to be blocked. Raising ``tol`` to 1e-3 lifts
-   the whole solution clear -- nothing below tolerance, and the result
-   verifies.
-
-   No inclusion cutoff fixes this, because the information was never in
-   the solution; sweeping it from 1e-6 down to zero changes nothing.
    SPECTRA warns when it sees the condition:
 
    .. code-block:: text
 
-      WARNING 645 of 1269 reactions in this solution carry less flux than
-      the solver can resolve (model.tolerance=1e-09) ...
+      WARNING N of M reactions in this solution carry less flux than the
+      solver can resolve (model.tolerance=1e-09), so whether they belong in
+      the model is not something the solution settles. The extracted model
+      may be unable to carry flux at all, core reactions included.
 
-   ``minNetMILP`` is immune, because its membership comes from its
-   binaries rather than from flux, and it verifies at ``tol=1e-4``.
+   The remedy is a larger ``tol``, which lifts the whole solution clear of
+   the solver's resolution. No inclusion cutoff helps, because the
+   information was never in the solution. How much larger is not something
+   that can be said in general — raise it until the warning stops, and
+   confirm with :func:`~spectra_cobra.check_extraction`.
 
-So the choice at this scale is between a verified 894 reactions in about
-sixteen minutes and a verified 420 in about seventy. Note also that the
-mixed-integer run did not *finish*: it stopped at its one-hour limit with
-the usual warning that the answer may not be minimal, and that unproven
-incumbent is still less than half the size of the LP's.
+   The three-tissue body above does not trigger it at ``tol=1e-4``: all 362
+   reactions carry flux the solver can resolve, and the result verifies.
+   Larger bodies, more tissues and larger cores all make it more likely.
 
-.. code-block:: text
+Other formulations, and what comes after
+----------------------------------------
 
-   tis1 244   tis2 246   tis3 270   tis4 127     core kept: 8/8
+Nothing in that call is specific to a multi-tissue body. ``spectra_me``
+takes a universal model and a core set, and a tagged body is simply a larger
+universal model: run the same call on a single untagged GEM with one
+tissue's core reactions and you have the ordinary single-model
+context-specific extraction that :doc:`extraction` describes. The tags are
+only what lets one solve cover three tissues while keeping each tissue's
+flux its own.
 
-``tis3`` comes back with the most boundary reactions of the four, which is
-what you would hope: it is the only tissue sitting on two pools.
+``problem_type`` is equally free. ``minNetLP`` is used above because it is
+cheap — one LP, 146 s on this 35,015-reaction body — but it is one of four,
+and they ask genuinely different questions rather than rounding one answer
+four ways:
 
-``decompose`` hands each tissue back as a model in its own right, untagged,
-with an exchange reaction wherever it met a pool — a transport ``x[e] → x_u``
-with the pool side dropped *is* an exchange, and it keeps the transport's
-bounds, so the measured rates survive the round trip.
+.. list-table::
+   :header-rows: 1
+   :widths: 24 46 15 15
+
+   * - ``problem_type``
+     - Objective
+     - Weights
+     - Solves
+   * - ``"minNetLP"``
+     - minimise weighted total absolute flux
+     - non-negative
+     - 1 LP
+   * - ``"minNetMILP"``
+     - minimise weighted reaction count
+     - non-negative
+     - 1 MILP
+   * - ``"growthOptim"``
+     - maximise objective flux minus weighted flux
+     - non-negative
+     - 1 LP
+   * - ``"tradeOff"``
+     - maximise net weight: positive in, negative out
+     - any real
+     - 1 MILP
+
+:doc:`formulations` sets out when each is the right question. The two
+mixed-integer ones answer a sharper version of it — *fewest reactions*
+rather than *least flux* — and on a body this size they are worth giving an
+explicit ``time_limit`` and reading as "best found so far" rather than as a
+proven optimum.
+
+Extraction also need not be the last step. A model built from expression
+evidence can still be unable to do things the tissue demonstrably does,
+because the evidence never covered them. Metabolic tasks state those
+capabilities directly — regenerate ATP from glucose aerobically, synthesise
+this amino acid from that precursor — and
+:func:`~spectra_cobra.check_tasks` reports which ones a tissue fails.
+:func:`~spectra_cobra.gapfill_for_tasks` then adds back the fewest reactions
+from a universal model that make the failing ones pass, with weights
+carrying the same evidence that drove the extraction. It applies on either
+side of ``decompose``: per tissue, with the untagged GEM as the donor, or to
+the whole body at once, where the candidates include the transports — so a
+capability one tissue lacks can be restored by letting it draw the
+metabolite from a pool rather than by giving it the pathway.
+:doc:`gapfilling_tasks` works through both the task format and the solve.
 
 References
 ----------
@@ -386,9 +511,11 @@ References
   three-dimensional view of gene variation in human metabolism. *Nature
   Biotechnology*, 36(3), 272–281. https://doi.org/10.1038/nbt.4072
 
-Reference
----------
+See also
+--------
 
-* :doc:`community` — the construction these tissues are built with
-* :doc:`../functions/community` — the builder itself
-* :doc:`recon3d` — working at genome scale
+* :doc:`../functions/community` — the builder's full signature
+* :doc:`recon3d` — working at genome scale, and where to get the model
+* :doc:`extraction` — what :func:`~spectra_cobra.spectra_me` does
+* :doc:`formulations` — choosing a ``problem_type``
+* :doc:`gapfilling_tasks` — holding a model to what it must be able to do
