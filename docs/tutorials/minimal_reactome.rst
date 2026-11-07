@@ -10,18 +10,6 @@ large part of the model can be deleted without it noticing. The **minimal
 reactome** is the smallest set of reactions that still meets a stated
 requirement.
 
-Finding it is worth the trouble for several reasons, following Sambamoorthy
-and Raman's MinReact. What survives every environment is a candidate for the
-organism's core metabolism, and what drops out in one medium but not another
-says which capabilities that medium actually demands — so minimal reactomes
-are a way to compare metabolic capability across nutrient conditions rather
-than just to shrink a file. A smaller network is also far easier to analyse:
-interventions, deletion studies and manual curation are all tractable on a
-few hundred reactions and punishing on a few thousand. And metabolic
-engineering often wants exactly this — the simplest chassis that still does
-the job, with the redundancy that would route around an intervention already
-removed.
-
 That question is Burgard, Vaidyaraman and Maranas', from 2001: how few
 reactions does *Escherichia coli* need in order to grow? Their answer was
 that there is no single answer, because it depends entirely on what is in the
@@ -37,20 +25,33 @@ still can.
 The problem
 -----------
 
-**Minimise** the number of reactions kept,
+What you supply is a set of **conditions**: one per medium, and one per
+task. A condition is a whole environment the network has to work in, and
+each gets its own flux vector. The network is not asked to do everything at
+once — it is asked to be able to do each of them.
 
-**subject to**
+**Minimise** the total weight of the reactions kept, each counted once
+however many conditions use it,
+
+**subject to**, separately within every condition,
 
 * **mass balance** — at steady state nothing piles up: every metabolite is
   consumed as fast as it is made;
 * **a reaction left out carries no flux** — dropping a reaction has to mean
   dropping what it does, not merely removing its name;
-* **the medium** — only what the environment supplies may be taken up;
-* **every requirement is met**:
+* **that condition's environment** — a medium closes every exchange and
+  reopens the ones it names, each to the uptake rate it gives; a task
+  closes every exchange too and opens only its own inputs and outputs, so
+  a task arrives with its own medium rather than inheriting one;
+* **that condition's demand** — growth at a stated rate and any products
+  you named, for a medium; the flux the task forces, for a task;
 
-  * grow at a stated rate,
-  * secrete a stated amount,
-  * or perform a stated task.
+and, tying the conditions to one another,
+
+* **one on/off decision per reaction, shared by all of them** — switching a
+  reaction off removes it from every condition at once, and switching it on
+  buys it in all of them for a single payment. This is what makes the answer
+  one network rather than a union of several.
 
 Minimising a *count* is a mixed-integer problem, so this is
 :func:`~spectra_cobra.spectra_me` with ``problem_type="minNetMILP"``. There
