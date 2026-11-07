@@ -35,6 +35,56 @@ As with the tasks, tracking one set of fluxes per medium over one shared set
 of on/off switches is a large problem to solve at once. What follows is the
 cheaper route SPECTRA takes: one medium at a time, unioning the additions.
 
+.. note::
+
+   **That joint formulation exists in SPECTRA.**
+   :func:`~spectra_cobra.minimal_reactome` builds one copy of the network
+   per medium in a single model, gives every copy of a reaction the same
+   binary, and minimises the weighted count across all the media at once —
+   :doc:`minimal_reactome` sets it out. It removes reactions rather than
+   adding them, but the problem is the same one, and making the draft's
+   reactions free points it this way:
+
+   .. code-block:: python
+
+      free = {rxn.id: 0.0 for rxn in draft.reactions}
+      result = minimal_reactome(universal, medium=media, min_growth=0.1,
+                                weights=free, seed=0)
+      added = set(result.kept) - {rxn.id for rxn in draft.reactions}
+
+   The difference is not only the guarantee. Unioning per-medium answers
+   gives whatever each medium chose on its own, and those choices need not
+   agree. On the textbook model with ``PGI``, ``PFK``, ``FBA``, ``ENO``,
+   ``CS``, ``ACONTa``, ``PPC``, ``ICL`` and ``MALS`` deleted, asked for
+   growth of at least 0.1 on glucose and on acetate:
+
+   .. list-table::
+      :header-rows: 1
+      :widths: 55 15 30
+
+      * - Route
+        - Added
+        - Reactions
+      * - :func:`~spectra_cobra.gapfill_for_growth`, medium by medium
+        - 8
+        - ``ACONTa CS ENO FBA ICL MALS PGI PPC``
+      * - :func:`~spectra_cobra.minimal_reactome`, both media at once
+        - **7**
+        - ``ACONTa CS ENO FBA ICL MALS PGI``
+
+   Both results grow in both media; the joint one does it without ``PPC``.
+   Filled on its own, glucose wants five reactions including ``PPC``, and
+   acetate wants the seven — which already cover glucose. Taking the media
+   in turn buys ``PPC`` first and has no way to un-buy it afterwards. What the joint solve costs is size: *k*
+   media means *k* copies of the network in one MILP, which is why it is
+   not what this page does by default.
+
+   Pass the draft through ``weights``, not ``keep_reactions``.
+   ``keep_reactions`` is a core set, so in a growth condition every reaction
+   in it is additionally forced to carry flux — more than gap-filling asks.
+   On the single-medium version of the example above that was the
+   difference between four added reactions and five.
+
 The shape of the problem
 ------------------------
 

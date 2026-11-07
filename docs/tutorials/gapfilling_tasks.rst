@@ -43,6 +43,44 @@ Solving this directly means tracking one set of fluxes per task over one
 shared set of on/off switches, which is a large problem. The rest of this
 page is how SPECTRA avoids paying for it.
 
+.. note::
+
+   **That direct formulation exists in SPECTRA.**
+   :func:`~spectra_cobra.minimal_reactome` is it: it builds one copy of the
+   network per condition in a single model, gives every copy of a reaction
+   the same binary, and minimises the weighted count across all of them at
+   once — :doc:`minimal_reactome` sets it out. It is written for the
+   opposite direction, removing reactions rather than adding them, but the
+   problem is the same one and it can be pointed this way by making the
+   draft's reactions free:
+
+   .. code-block:: python
+
+      free = {rxn.id: 0.0 for rxn in draft.reactions}
+      result = minimal_reactome(universal, tasks=tasks, weights=free,
+                                growth_fraction=0.0, seed=0)
+      added = set(result.kept) - {rxn.id for rxn in draft.reactions}
+
+   On the textbook model with ``PGI``, ``PFK``, ``FBA``, ``ENO``, ``CS`` and
+   ``ACONTa`` deleted and the two-task list below, both routes add four
+   reactions — different four, since there are alternative optima. What
+   differs is the guarantee rather than the answer: the joint problem
+   returns a true minimum over every task at once, while the two-phase route
+   on this page does not promise one. What it costs is *k* copies of the
+   network for *k* tasks, which is why it is not the default.
+
+   Two arguments matter if you do this:
+
+   * **``growth_fraction=0.0``** unless you want growth as well. It
+     defaults to 1.0, which silently adds a full-growth condition alongside
+     the tasks; here that turned four added reactions into six.
+   * **``weights``, not ``keep_reactions``.** ``keep_reactions`` is a core
+     set: in any *growth* condition every reaction in it is additionally
+     forced to carry flux, which is a stronger demand than gap-filling
+     makes. With tasks alone it happens to make no difference, because a
+     task brings its own medium and is left alone — but add a medium with
+     a growth requirement and it does. Weights keep the two apart.
+
 The trick: tasks become core reactions
 --------------------------------------
 
