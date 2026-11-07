@@ -492,6 +492,46 @@ def test_multi_tissue_replicates_one_model_across_tissues(solver: str) -> None:
     ]
 
 
+def test_multi_tissue_takes_one_model_per_tissue(solver: str) -> None:
+    """Tissues that are different networks are given as a sequence."""
+    from spectra_cobra import build_multi_tissue_model
+
+    liver = _organism("liver", solver, eats="glc", makes="lac")
+    muscle = _organism("muscle", solver, eats="lac", makes="co2")
+
+    body = build_multi_tissue_model(
+        [liver, muscle],
+        tissues=["tis1", "tis2"],
+        pools={"Bl": ["tis1", "tis2"]},
+        environment=["Bl"],
+        anchor_reactions={"tis1": "biomass", "tis2": "biomass"},
+        pool_medium={"glc_e": (-10.0, 1000.0)},
+    )
+
+    metabolites = {m.id for m in body.model.metabolites}
+    assert {"glc_e__tis1", "lac_e__tis2"} <= metabolites
+    # Each tissue kept its own network, not a copy of the first one.
+    assert "glc_e__tis2" not in metabolites
+    assert "co2_e__tis1" not in metabolites
+
+
+def test_multi_tissue_rejects_a_model_count_that_is_not_the_tissue_count(
+    solver: str,
+) -> None:
+    """One model per tissue, or one model for all of them, and nothing else."""
+    from spectra_cobra import build_multi_tissue_model
+
+    gem = _organism("gem", solver, eats="glc", makes="ac")
+
+    with pytest.raises(SpectraError, match="2 models for 3 tissues"):
+        build_multi_tissue_model(
+            [gem, gem],
+            tissues=["tis1", "tis2", "tis3"],
+            pools={"Bl": ["tis1", "tis2", "tis3"]},
+            environment=["Bl"],
+        )
+
+
 def _eater(name: str, met_id: str, solver: str, compartment: str = "e") -> Model:
     """Return a one-reaction unit that eats one external metabolite."""
     model = Model(name)

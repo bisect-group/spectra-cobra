@@ -1412,7 +1412,7 @@ def build_community_model(
 
 
 def build_multi_tissue_model(
-    model: "Model",
+    model: Union["Model", Sequence["Model"]],
     tissues: Sequence[str],
     pools: Mapping[str, Iterable[str]],
     environment: Iterable[str],
@@ -1423,9 +1423,13 @@ def build_multi_tissue_model(
 
     Parameters
     ----------
-    model : cobra.Model
-        The reference network every tissue starts from, typically a
-        human genome-scale reconstruction.
+    model : cobra.Model or sequence of cobra.Model
+        The reference network every tissue starts from, typically a human
+        genome-scale reconstruction. Give one model and every tissue is a
+        copy of it, which is the usual case: what then distinguishes the
+        tissues is their bounds, their core reactions and which pool they
+        reach. Give one model per tissue, in the same order as `tissues`,
+        when the tissues are genuinely different networks.
     tissues : sequence of str
         The tissue names, which become the tag on every reaction.
     pools : mapping of {str: iterable of str}
@@ -1455,10 +1459,20 @@ def build_multi_tissue_model(
     reference model is usually large and copying it correctly matters.
 
     """
-    # The same model, handed over once per tissue: the builder reads its
-    # inputs and never modifies them, so copying a human reconstruction
-    # five times would only cost time.
-    copies = [model] * len(tissues)
+    # One model per tissue, or the same model handed over once per tissue:
+    # the builder reads its inputs and never modifies them, so copying a
+    # human reconstruction five times would only cost time.
+    if isinstance(model, Sequence) and not isinstance(model, str):
+        copies = list(model)
+        if len(copies) != len(tissues):
+            raise SpectraError(
+                f"build_multi_tissue_model was given {len(copies)} models "
+                f"for {len(tissues)} tissues. Pass one model per tissue, in "
+                f"the same order, or a single model for every tissue to be "
+                f"a copy of."
+            )
+    else:
+        copies = [model] * len(tissues)
     anchors = (
         {tissue: anchor_reactions[tissue] for tissue in tissues}
         if anchor_reactions
