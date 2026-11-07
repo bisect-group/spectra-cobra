@@ -1368,8 +1368,24 @@ def _apply_warm_start(
             "solution, which it may not manage at this size"
         )
         return False
+    # A binary has to be on wherever its reactions carry flux the indicator
+    # constraint would notice. With y = 0 that constraint forces v to zero, so
+    # a start that leaves the binary off while handing the solver a nonzero
+    # flux contradicts itself, and the solver throws the whole start away:
+    #
+    #     User MIP start did not produce a new incumbent solution
+    #     User MIP start violates constraint spectra_z_upper_<rxn> by 1e-05
+    #
+    # Hence the cutoff the extraction itself uses to call a reaction present,
+    # rather than `tol`. The two are seven orders of magnitude apart, and on a
+    # medium-limited community the gap is populated: reactions downstream of a
+    # scarce nutrient carry real flux far below `tol`, and every one of them
+    # was quietly invalidating the start. On the 104-organism hCOM community
+    # that was about 1062 reactions, and the mixed-integer solve went 17 hours
+    # without an incumbent as a result.
+    threshold = tol * INCLUSION_CUTOFF_FACTOR
     on = {
-        key: any(abs(fluxes.get(rxn_id, 0.0)) >= tol for rxn_id in members)
+        key: any(abs(fluxes.get(rxn_id, 0.0)) >= threshold for rxn_id in members)
         for key, members in groups.items()
     }
     try:
