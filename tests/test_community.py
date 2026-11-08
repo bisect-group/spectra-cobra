@@ -340,12 +340,45 @@ def test_pools_are_validated(three, pools, environment, message) -> None:
 
 def test_link_bounds_constrain_what_crosses_into_a_pool(three) -> None:
     """This is where a measured uptake rate goes."""
-    community = _blood_and_interface(three, link_bounds={"ac_e": (-2.0, 3.0)})
+    community = _blood_and_interface(
+        three, link_bounds={"TR_ac_Bl__A": (-2.0, 3.0), "TR_ac_iface__C": (-2.0, 3.0)}
+    )
     model = community.model
 
     assert model.reactions.get_by_id("TR_ac_Bl__A").bounds == (-2.0, 3.0)
     assert model.reactions.get_by_id("TR_ac_iface__C").bounds == (-2.0, 3.0)
     assert model.reactions.get_by_id("TR_glc_Bl__A").bounds == (-1000.0, 1000.0)
+
+
+def test_link_bounds_can_name_one_transport_rather_than_a_metabolite(three) -> None:
+    """A measured rate belongs to one unit, not to every unit at once."""
+    community = _blood_and_interface(
+        three, link_bounds={"TR_ac_Bl__A": (-2.0, 0.0), "TR_ac_iface__C": (-5.0, 1.0)}
+    )
+    model = community.model
+
+    assert model.reactions.get_by_id("TR_ac_Bl__A").bounds == (-2.0, 0.0)
+    assert model.reactions.get_by_id("TR_ac_iface__C").bounds == (-5.0, 1.0)
+    # The other units' acetate transports are untouched, which is the point.
+    assert model.reactions.get_by_id("TR_ac_Bl__B").bounds == (-1000.0, 1000.0)
+
+
+def test_link_bounds_refuses_a_metabolite_identifier(three) -> None:
+    """One bound for every unit is not what a measured rate says."""
+    with pytest.raises(SpectraError, match="keyed by transport reaction"):
+        _blood_and_interface(three, link_bounds={"ac_e": (-2.0, 3.0)})
+
+
+def test_link_bounds_reports_a_transport_that_does_not_exist(three, caplog) -> None:
+    """A misspelt transport would otherwise leave the bounds wide open."""
+    with caplog.at_level("WARNING"):
+        community = _blood_and_interface(three, link_bounds={"TR_ac_Bl__nope": (0.0, 1.0)})
+
+    assert "TR_ac_Bl__nope" in caplog.text
+    assert community.model.reactions.get_by_id("TR_ac_Bl__A").bounds == (
+        -1000.0,
+        1000.0,
+    )
 
 
 def test_pool_medium_constrains_the_community_exchanges(three) -> None:

@@ -65,6 +65,14 @@ logger = getLogger(__name__)
 #: it belongs to.
 ORGANISM_SEPARATOR = "__"
 
+#: Prefix on a transport reaction, which carries one metabolite between one
+#: unit and one pool: ``TR_<metabolite>_<pool>__<unit>``.
+TRANSPORT_PREFIX = "TR_"
+
+#: What a transport may carry when nothing says otherwise. Negative is the
+#: pool feeding the unit, positive the unit feeding the pool.
+DEFAULT_LINK_BOUNDS = (-1000.0, 1000.0)
+
 #: Name of the pool the units trade through, when only one is needed.
 SHARED_SUFFIX = "u"
 
@@ -827,6 +835,58 @@ def _resolve_bounds(
     return resolved
 
 
+def _link_bounds_by_transport(
+    link_bounds: Optional[Mapping[str, Tuple[float, float]]],
+) -> Dict[str, Tuple[float, float]]:
+    """Return `link_bounds` keyed by transport reaction, validated.
+
+    Parameters
+    ----------
+    link_bounds : mapping, optional
+        Bounds keyed by transport reaction identifier.
+
+    Returns
+    -------
+    dict of {str: tuple of float}
+        The same bounds, as floats.
+
+    Raises
+    ------
+    SpectraError
+        If any key is not a transport reaction identifier.
+
+    Notes
+    -----
+    A transport carries one metabolite between one unit and one pool, so
+    bounding it is the per-unit statement a measured rate makes. Keying by
+    metabolite instead would set the same bound on every unit's transport
+    of it, which is almost never what a measurement says.
+
+    Keys are recognised by the ``TR_`` prefix rather than by looking them
+    up, because the transports do not exist yet when this runs. Ones that
+    match no transport are reported once they do.
+
+    """
+    resolved: Dict[str, Tuple[float, float]] = {}
+    wrong = []
+    for key, bounds in (link_bounds or {}).items():
+        if not key.startswith(TRANSPORT_PREFIX):
+            wrong.append(key)
+            continue
+        resolved[key] = (float(bounds[0]), float(bounds[1]))
+    if wrong:
+        raise SpectraError(
+            f"link_bounds is keyed by transport reaction, not by metabolite, "
+            f"but {len(wrong)} key(s) are not transports, for example "
+            f"{sorted(wrong)[:5]}. A transport is named "
+            f"TR_<metabolite>_<pool>__<unit> -- the metabolite as the pool "
+            f"spells it, with no compartment -- and bounding one of them is "
+            f"what a measured per-unit rate says. To bound every unit's "
+            f"transport of a metabolite, name them all."
+        )
+    return resolved
+
+
 def _report_sharing(
     pool_members: Mapping[str, Sequence[str]],
     touched: Mapping[Tuple[str, str], set],
@@ -1000,9 +1060,17 @@ def build_community_model(
         metabolite drained by one community-wide exchange needs it.
     link_bounds : mapping of {str: tuple of float}, optional
         Bounds on what may cross between a unit and a pool, keyed by
-        metabolite as the unit models spell it. This is where measured
-        uptake and secretion rates go. Only meaningful when `mode` is
-        ``"pooled"``, since otherwise there is nothing to bound.
+        **transport reaction**: ``TR_<metabolite>_<pool>__<unit>``, with the
+        metabolite as the pool spells it and no compartment. One transport
+        is one unit's access to one metabolite in one pool, which is what a
+        measured uptake or secretion rate is about. A key that is not a
+        transport is an error, and one naming a transport that does not
+        exist is reported. Only meaningful when `mode` is ``"pooled"``,
+        since otherwise there is nothing to bound.
+
+        Negative is the pool feeding the unit and positive the unit feeding
+        the pool, so an uptake cap of 10 is a *lower* bound of ``-10``.
+        Anything unnamed keeps ``(-1000, 1000)``.
     pool_medium : mapping of {str: tuple of float}, optional
         Bounds on the exchange reactions between a pool and the
         environment, keyed by metabolite as the unit models spell it.
@@ -1137,7 +1205,7 @@ def build_community_model(
             )
             key_of_metabolite[met.id] = key
             examples.setdefault(organism, []).append(met.id)
-    link_by_key = _resolve_bounds(link_bounds, key_of_metabolite, "link_bounds")
+    link_by_reaction = _link_bounds_by_transport(link_bounds)
     medium_by_key = _resolve_bounds(pool_medium, key_of_metabolite, "pool_medium")
 
     def tag(identifier: str, organism: str) -> str:
@@ -1246,9 +1314,12 @@ def build_community_model(
                         pool_mets[pool].append(shared_met.id)
                         community.add_metabolites([shared_met])
                     shared_met = pooled[(pool, base)]
-                    lower, upper = link_by_key.get(base, (-1000.0, 1000.0))
+                    transport_id = tag(f"{TRANSPORT_PREFIX}{shared_met.id}", organism)
+                    lower, upper = link_by_reaction.get(
+                        transport_id, DEFAULT_LINK_BOUNDS
+                    )
                     transport = Reaction(
-                        tag(f"TR_{shared_met.id}", organism),
+                        transport_id,
                         name=f"{met.name} transport, {organism} to {pool}",
                         lower_bound=lower,
                         upper_bound=upper,
@@ -1265,6 +1336,21 @@ def build_community_model(
         for transport, organism, local, shared_met in transports:
             transport.add_metabolites({local: -1.0, shared_met: 1.0})
             reactions_of[organism] = reactions_of[organism] + (transport.id,)
+
+    # Now that the transports exist, a reaction-keyed bound that named one
+    # of them has been applied; anything left over named nothing. Say so,
+    # because a misspelt transport silently leaves its bounds wide open.
+    missed = sorted(set(link_by_reaction) - {t.id for t, _, _, _ in transports})
+    if missed:
+        logger.warning(
+            "%d of %d transport(s) named in link_bounds do not exist and "
+            "were ignored, for example %s. A transport is named "
+            "TR_<metabolite>_<pool>__<unit>, with the metabolite as the pool "
+            "spells it -- no compartment.",
+            len(missed),
+            len(link_by_reaction),
+            missed[:5],
+        )
 
     # The environment, reachable only through an open pool.
     key_of_pool_metabolite = {
