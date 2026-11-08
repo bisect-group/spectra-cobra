@@ -636,6 +636,93 @@ reaction.
    reattached. You will see a warning saying so. Renaming the reaction
    avoids the detour.
 
+What the two formulations cost at this scale
+--------------------------------------------
+
+Both formulations were run on the 104-organism community, Gurobi on 16
+cores, ``tol=1e-5``, biomass weighted zero and no core set — every biomass
+reaction already carries a lower bound of 0.1, so the bounds force what a
+core set would have forced. The consistency check reduces the pooled
+universal to **395,670 of 518,259** reactions first, and both runs start
+from that:
+
+.. code-block:: python
+
+   filled, solution = spectra_me(
+       consistent, [], tol=1e-5, weights=weights,
+       problem_type=problem_type, time_limit=61200,
+       feasibility_tolerance=1e-9, return_solutions=True,
+   )
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 30 30
+
+   * -
+     - ``minNetLP``
+     - ``minNetMILP``
+   * - reactions kept
+     - 30,836
+     - 30,332
+   * - metabolites
+     - 31,420
+     - 30,928
+   * - problem assembly
+     - —
+     - 14,293 s
+   * - solve
+     - 785 s
+     - 61,201 s
+   * - **total**
+     - **811 s**
+     - **81,073 s**
+   * - solver status
+     - optimal
+     - ``time_limit``
+   * - reactions added, all 104 organisms
+     - 453
+     - 15,739
+
+"Reactions added" is each organism's share of the result minus its draft,
+summed: what the gap-fill borrowed that the draft did not have. The two
+numbers are the reason to read the rest of this section carefully.
+
+``minNetLP`` solves one LP in 13 minutes and adds 453 reactions across 104
+organisms — a median of 4 each. That is the formulation to use on a
+community this size.
+
+``minNetMILP`` did **not** finish. It consumed its full 17-hour limit and
+returned the incumbent it had, which SPECTRA reports rather than passes off
+as an answer:
+
+.. code-block:: text
+
+   The minNetMILP problem stopped at status 'time_limit' rather than
+   optimality; the returned model is feasible but may not be minimal.
+
+Take that warning literally here. Minimising a reaction *count* cannot
+legitimately add more reactions than minimising weighted flux, yet this
+result adds 15,739 against the LP's 453 — 151 per organism against 4. It is
+not a nearly-minimal network; it is a feasible one that the solver never got
+far enough to improve. The incumbent came back the same size as the warm
+start it began from, which is consistent with no progress at all over 17
+hours.
+
+.. warning::
+
+   Do not read a ``time_limit`` mixed-integer result as "approximately
+   minimal". Check it against a linear run on the same inputs: if the MILP
+   has added far more than the LP, the solve did not get anywhere, and the
+   LP result is the better model.
+
+Why it stalls is still open. The leading suspect is that cobrapy splits
+every reaction into a non-negative forward and reverse pair, so one flux
+value becomes a line of equivalent solutions and the node LPs are badly
+degenerate — on the identical forward LP the Python formulation took 2.88
+times the simplex iterations for 1.5 times the columns. That costs node
+throughput rather than solution quality, but against a wall clock the two
+amount to the same thing.
+
 References
 ----------
 
