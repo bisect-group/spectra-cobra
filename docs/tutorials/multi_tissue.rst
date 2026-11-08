@@ -1,20 +1,22 @@
 Multi-tissue models
 ===================
 
-A multi-tissue model is several copies of a metabolic network, one per
-tissue, joined by the places they exchange metabolites: blood, an interstitial
-space, the gut lumen. Each tissue keeps its own copy of every reaction and
-every metabolite, so the same reaction running in liver and in muscle is two
-separate reactions carrying separate flux. What connects them is a **pool** —
-a compartment several tissues can reach — and what distinguishes them is
-their bounds, which pools they reach, and which reactions they are required
-to keep.
+A multi-tissue model is one network per tissue, joined by the places they
+exchange metabolites: blood, an interstitial space, the gut lumen. The
+networks may be copies of a single reconstruction, which is the case if we
+are extracting multi-tissue context-specific models, or genuinely different
+models, one per tissue. Either way each tissue keeps its own copy of every
+reaction and every metabolite it has, so the same reaction running in liver
+and in muscle is two separate reactions carrying separate flux. What connects
+them is a **pool** — a compartment several tissues can reach — and what
+distinguishes them is their networks, their bounds, which pools they reach,
+and which reactions they are required to keep.
 
-This page builds one from Recon3D and extracts context-specific tissues from
-it. Nothing here assumes you have read anything else.
+This page builds one from Recon3D and extracts a multi-tissue
+context-specific model from it.
 
-How the pieces are named
-------------------------
+How the reactions and metabolites are named
+-------------------------------------------
 
 Everything a tissue owns is tagged with that tissue's name. A reaction
 ``PGI`` becomes ``PGI__tis1`` in the first tissue and ``PGI__tis2`` in the
@@ -114,8 +116,8 @@ nodes are ``glc_D[e]__tis1``, ``glc_D[e]__tis2``, ``glc_D[e]__tis3`` for the
 three tissue copies, ``glc_D_Bl`` and ``glc_D_tis2_tis3`` for the two pools,
 ``TR_glc_D_Bl__tis1`` for a transport, and ``EX_glc_D_Bl`` for the exchange.
 
-Building one
-------------
+Building one example multi-tissue model
+---------------------------------------
 
 Three tissues. ``tis1`` and ``tis2`` are perfused by blood; ``tis3`` only ever
 meets ``tis2``.
@@ -178,9 +180,7 @@ every number on this page was measured against that exact file:
    # What the blood carries. Recon3D ships with all of its exchanges open,
    # so this says the blood offers everything the reconstruction knows how
    # to take up. Narrow it to the metabolites your blood actually carries
-   # when you have that measurement -- but narrow it deliberately, because
-   # a human tissue starves on a medium that an E. coli model would be
-   # perfectly happy with.
+   # when you have that measurement.
    blood = {next(iter(r.metabolites)).id: (-1000.0, 1000.0)
             for r in gem.reactions
             if r.id.startswith("EX_") and len(r.metabolites) == 1}
@@ -359,7 +359,8 @@ narrowing it is usually the first thing to do with real data.
 **The link bounds** are what each tissue may draw from a pool, from measured
 per-tissue uptake and secretion rates. ``link_bounds`` attaches them to the
 transports, which is why the builder makes one transport per tissue rather
-than letting tissues share.
+than letting tissues share. `Bounding one tissue's uptake`_ below works
+through it.
 
 **The anchor** is what each tissue must keep doing. Maintenance biomass, or
 ATP maintenance, or a demand reaction for a product the tissue is known to
@@ -380,6 +381,111 @@ the whole body.
    core comes from expression data as described above, and it is a great deal
    larger: a few hundred to a few thousand reactions per tissue rather than
    one. The extraction call does not change — only the contents of ``core``.
+
+Bounding one tissue's uptake
+----------------------------
+
+``link_bounds`` is how a measured rate reaches the model. It sets the bounds
+on the **transport** reactions, and it is keyed by transport:
+``TR_<metabolite>_<pool>__<tissue>``, with the metabolite as the pool spells
+it, so no compartment. One transport is one tissue's access to one metabolite
+in one pool, which is the statement a measurement actually makes.
+
+UTP is bounded below because it is what this body is most sensitive to. With
+the blood wide open Recon3D routes around almost every single metabolite —
+glucose and oxygen included — and of the 1,559 exchanges, blocking
+``utp[e]`` costs the maintenance reaction the most.
+
+.. code-block:: python
+
+   body = build_multi_tissue_model(
+       gem,
+       tissues=["tis1", "tis2", "tis3"],
+       pools={"Bl": ["tis1", "tis2"], "tis2_tis3": ["tis2", "tis3"]},
+       environment=["Bl"],
+       anchor_reactions={t: "biomass_maintenance"
+                         for t in ("tis1", "tis2", "tis3")},
+       pool_medium=blood,
+       link_bounds={"TR_utp_Bl__tis1": (-1.0, 0.0)},
+       couple=False,
+   )
+
+Maximising each tissue's maintenance in turn:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 20 20 20
+
+   * - capped
+     - ``tis1``
+     - ``tis2``
+     - ``tis3``
+   * - nothing
+     - 755.0032
+     - 755.0032
+     - 755.0032
+   * - ``TR_utp_Bl__tis1``
+     - **705.6108**
+     - 755.0032
+     - 755.0032
+   * - ``TR_utp_Bl__tis2``
+     - 755.0032
+     - 755.0032
+     - 755.0032
+   * - ``TR_utp_Bl__tis2`` and ``TR_utp_tis2_tis3__tis2``
+     - 755.0032
+     - **705.6618**
+     - **705.5598**
+
+The first row with a cap is the point of the whole argument: one entry
+reaches one tissue. ``tis1`` loses 6.5% of its maintenance capacity and the
+other two are untouched, which is what a per-tissue measured rate should do
+and what a metabolite-wide bound could never express.
+
+The next two rows are the topology answering back. Capping ``tis2``'s blood
+transport alone changes nothing, because ``tis2`` is the one tissue on two
+pools and simply draws its UTP across the ``tis2``/``tis3`` interface
+instead. Cap both of its transports and it finally drops — and so does
+``tis3``, to 705.5598, because the second cap also stops ``tis2`` pushing
+UTP into the interface, and the interface was ``tis3``'s only supply.
+Constraining a tissue means constraining every route it has.
+
+A metabolite identifier is **not** accepted, and says so:
+
+.. code-block:: python
+
+   link_bounds={"utp[e]": (-1.0, 0.0)}
+
+.. code-block:: text
+
+   SpectraError: link_bounds is keyed by transport reaction, not by
+   metabolite, but 1 key(s) are not transports, for example ['utp[e]'].
+   A transport is named TR_<metabolite>_<pool>__<unit> -- the metabolite as
+   the pool spells it, with no compartment -- and bounding one of them is
+   what a measured per-unit rate says. To bound every unit's transport of a
+   metabolite, name them all.
+
+A metabolite would have meant one bound shared by every tissue and every
+pool. The table above is the argument against it: the four transports of
+UTP do four different jobs, and three of the four rows depend on telling
+them apart.
+
+**The sign is the thing to get right.** A transport is written
+``<tissue's metabolite> → <pool's metabolite>``, so positive flux is the
+tissue *feeding* the pool and negative flux is the tissue *drawing from* it.
+An uptake cap of 1 is therefore a lower bound of ``-1``, and ``(-1.0, 0.0)``
+reads "may take up to 1, may not secrete at all". Anything unnamed keeps
+``(-1000, 1000)``, which is open in both directions.
+
+A transport that does not exist is reported rather than ignored, since a
+misspelt one would otherwise leave that crossing wide open:
+
+.. code-block:: text
+
+   WARNING 1 of 2 transport(s) named in link_bounds do not exist and were
+   ignored, for example ['TR_utp_Bl__tis3']. A transport is named
+   TR_<metabolite>_<pool>__<unit>, with the metabolite as the pool spells
+   it -- no compartment.
 
 Extracting context-specific tissues
 -----------------------------------

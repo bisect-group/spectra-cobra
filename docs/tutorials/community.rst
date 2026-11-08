@@ -269,11 +269,17 @@ what you want for anything real.
 
 .. tip::
 
-   ``pool_medium`` and ``link_bounds`` are keyed by metabolite identifier
-   as *your* models spell it, and are resolved by looking each one up
-   among the metabolites that exist rather than by stripping suffixes. A
-   name matching nothing is reported rather than silently ignored, which
-   is how you find out a medium file and a model disagree.
+   ``pool_medium`` is keyed by metabolite identifier as *your* models spell
+   it, resolved by looking each name up among the metabolites that exist
+   rather than by stripping suffixes. A name matching nothing is reported
+   rather than silently ignored, which is how you find out a medium file
+   and a model disagree.
+
+   ``link_bounds`` is keyed by **transport reaction** instead,
+   ``TR_<metabolite>_<pool>__<unit>`` — one unit's access to one metabolite
+   in one pool, which is what a measured rate is about. A metabolite
+   identifier is refused rather than quietly applied to every unit, and a
+   transport that does not exist is reported.
 
 A toy community, end to end
 ---------------------------
