@@ -24,9 +24,11 @@ reading presence from the model would count an absent organism as present.
 Building a community
 --------------------
 
-The nine reconstructions are AGORA 1.03, which is public. This downloads
-them, so the page runs from a clean directory with nothing to obtain by
-hand:
+The nine reconstructions are **AGORA2 version 2.0**, built 20 June 2022 by
+the Thiele group and obtained from `VMH <https://vmh.life/>`_. The copies
+used here are the ones committed alongside the SPECTRA manuscript, which
+makes them fetchable in a few lines so the page runs from a clean directory
+with nothing to obtain by hand:
 
 .. code-block:: python
 
@@ -36,8 +38,8 @@ hand:
    from cobra.io import load_matlab_model
    from spectra_cobra import build_community_model
 
-   AGORA = ("https://raw.githubusercontent.com/VirtualMetabolicHuman/AGORA"
-            "/master/CurrentVersion/AGORA_1_03/AGORA_1_03_mat")
+   AGORA2 = ("https://raw.githubusercontent.com/bisect-group/SPECTRA"
+             "/paper_codes/MinimalMicrobiome/models")
 
    strains = [
        "Bacteroides_thetaiotaomicron_VPI_5482",
@@ -58,7 +60,7 @@ hand:
    for name in strains:
        target = models_dir / f"{name}.mat"
        if not target.exists():
-           urlretrieve(f"{AGORA}/{name}.mat", target)
+           urlretrieve(f"{AGORA2}/{name}.mat", target)
 
    models = [load_matlab_model(str(models_dir / f"{name}.mat"))
              for name in strains]
@@ -70,6 +72,9 @@ hand:
    cannot carry flux and the unit is inert. That is correct and expected:
    AGORA reconstructions arrive with their exchanges closed, so nothing can
    grow until a diet opens them. The next section does that.
+
+   The result has 16,199 reactions over 13,730 metabolites, with 708 shared
+   exchanges.
 
 Each organism keeps its own external compartment; a transport links it to a
 shared pool, and one community exchange connects the pool to the
@@ -127,7 +132,8 @@ is also public:
 
 Close everything first. A diet is defined as much by what it withholds as by
 what it supplies, and the organisms' default bounds are usually far more
-permissive than you intend.
+permissive than you intend. Of the 175 metabolites, 146 match a shared
+exchange; the rest name things none of these nine organisms exchange.
 
 Reducing the community
 ----------------------
@@ -147,8 +153,8 @@ Reducing the community
 
 .. code-block:: text
 
-   2 of 9 organisms; growth 3.694 (needed 2.915), production 8.657 (needed 7.02)
-   ['Ecol', 'Erec'] ['Badl', 'Bthe', 'Efae', 'Fpra', 'Kpne', 'Lcas', 'Sthe']
+   3 of 9 organisms; growth 3.289 (needed 2.631), production 16.24 (needed 9.781)
+   ['Ecol', 'Efae', 'Fpra'] ['Badl', 'Bthe', 'Erec', 'Kpne', 'Lcas', 'Sthe']
 
 A warning about reactions carrying less flux than the solver can resolve is
 expected here and does not affect the answer. It concerns which *reactions*
@@ -163,49 +169,67 @@ minimal community is held to a fraction of each. Asking for a fraction of
 something unmeasured would make the answer depend on the units of the
 biomass reaction.
 
-A published comparison
-----------------------
+Against the published result
+----------------------------
 
-The nine-member gut community of Raghu et al. — *Bacteroides
+The nine-member gut community is that of Raghu et al. — *Bacteroides
 thetaiotaomicron*, *Eubacterium rectale*, *Faecalibacterium prausnitzii*,
 *Enterococcus faecalis*, *Lactobacillus casei*, *Streptococcus
 thermophilus*, *Bifidobacterium adolescentis*, *Escherichia coli* and
 *Klebsiella pneumoniae* — on a Western diet, preserving butyrate.
 
-The community built here has 12162 reactions over 10168 metabolites with
-341 shared exchanges. Its behaviour reproduces the published figures:
+The published work used **AGORA 1.03**; this page uses **AGORA2**. Those are
+different reconstructions of the same nine strains, so the numbers differ
+throughout, and the comparison is only meaningful if the reconstruction is
+held fixed:
 
 .. list-table::
    :header-rows: 1
-   :widths: 46 27 27
+   :widths: 40 20 20 20
 
    * -
      - Published
-     - Here
+     - AGORA 1.03
+     - AGORA2
+   * - reactions in the community
+     - —
+     - 12,162
+     - 16,199
+   * - shared exchanges
+     - —
+     - 341
+     - 708
    * - community growth (h\ :sup:`-1`)
      - 3.643
-     - 3.6433
+     - 3.6434
+     - 3.2886
    * - community butyrate (mmol/gDW-h)
      - 8.775
-     - 8.775
-   * - 80% growth requirement
-     - 2.915
-     - 2.915
-   * - 80% butyrate requirement
-     - 7.020
-     - 7.020
+     - 8.7755
+     - 12.2264
    * - minimal microbiome size
      - 2
-     - 2
+     - **2**
+     - **3**
 
-The membership differs: the published pair is *E. coli* with *F.
-prausnitzii*, and the pair found here is *E. coli* with *E. rectale*. That
-is a tie rather than a disagreement, and it can be checked directly by
-forcing each in:
+Run on AGORA 1.03 — the inputs the paper used — SPECTRA reproduces the
+published figures to four decimals and finds a two-member community. On
+AGORA2 the same code finds three. That is the reconstruction talking, not
+the algorithm: AGORA2 gives these strains different exchange capabilities,
+and the butyrate route that two organisms covered in 1.03 takes three here.
+
+Expect this whenever a reconstruction set is upgraded. If you are comparing
+against a published minimal microbiome, match the model version first.
+
+Ties are the normal case
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Several subsets of equal size usually qualify, and which one you get is not
+meaningful on its own. Forcing a member in shows the alternatives:
 
 .. code-block:: python
 
-   for forced in (["Fpra"], ["Erec"]):
+   for forced in (["Fpra"], ["Erec"], ["Ecol"]):
        result = minimal_microbiome(community, products=["EX_but_u"],
                                    required=forced, growth_fraction=0.8,
                                    product_fraction=0.8)
@@ -214,25 +238,34 @@ forcing each in:
 
 .. code-block:: text
 
-   required=['Fpra']: ['Ecol', 'Fpra']
-        2 of 9 organisms; growth 3.694 (needed 2.915), production 14.46 (needed 7.02)
-   required=['Erec']: ['Ecol', 'Erec']
-        2 of 9 organisms; growth 3.694 (needed 2.915), production 8.657 (needed 7.02)
+   required=['Fpra']: ['Ecol', 'Erec', 'Fpra']
+        3 of 9 organisms; growth 3.289 (needed 2.631), production 11.39 (needed 9.072)
+   required=['Erec']: ['Ecol', 'Erec', 'Fpra']
+        3 of 9 organisms; growth 3.289 (needed 2.631), production 11.39 (needed 9.072)
+   required=['Ecol']: ['Ecol', 'Efae', 'Fpra']
+        3 of 9 organisms; growth 3.289 (needed 2.631), production 16.24 (needed 9.072)
 
-Both are two-member communities meeting every constraint, so both are
-optimal: the objective counts organisms, and both cost two. Note that the
-published pair makes considerably *more* butyrate — 14.5 against 8.7 — and
-that this does not break the tie, because production is a constraint here
-and not the thing being minimised. If you want the most productive of the
-smallest communities, that is a second optimisation, not this one.
+Two distinct three-member communities, both optimal: the objective counts
+organisms and both cost three. They differ considerably in what they make —
+16.24 against 11.39 mmol/gDW-h of butyrate — and that does **not** break the
+tie, because production is a constraint here and not the thing being
+minimised. If you want the most productive of the smallest communities, that
+is a second optimisation, not this one.
 
 .. note::
 
-   Ties are the normal case, not an edge case. A gut community is
-   functionally redundant by nature, which is the whole reason a minimal
-   microbiome is interesting, and the same redundancy means several
-   subsets of equal size usually qualify. Treat a single run as *one*
-   minimal microbiome rather than *the* minimal microbiome.
+   A gut community is functionally redundant by nature, which is the whole
+   reason a minimal microbiome is interesting, and the same redundancy means
+   ties are routine. Treat a single run as *one* minimal microbiome rather
+   than *the* minimal microbiome.
+
+.. note::
+
+   ``required`` also changes what the requirement *is*. The floors are
+   measured on the full community with the forced organisms already pinned,
+   so the butyrate requirement above is 9.072 rather than the 9.781 of the
+   unforced run. The runs are therefore comparable in size but not in their
+   production figures.
 
 Keeping an organism whatever the objective says
 -----------------------------------------------
@@ -261,6 +294,10 @@ References
   function-specific minimal microbiomes from large microbial communities.
   *npj Systems Biology and Applications*, 10, 46.
   https://doi.org/10.1038/s41540-024-00373-1
+* Heinken, A., Hertel, J., Acharya, G., et al. (2023). Genome-scale
+  metabolic reconstruction of 7,302 human microorganisms for personalized
+  medicine. *Nature Biotechnology*, 41(9), 1320–1331.
+  https://doi.org/10.1038/s41587-022-01628-0
 * Magnúsdóttir, S., Heinken, A., Kutt, L., et al. (2017). Generation of
   genome-scale metabolic reconstructions for 773 members of the human gut
   microbiota. *Nature Biotechnology*, 35(1), 81–89.
