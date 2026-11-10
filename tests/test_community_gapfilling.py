@@ -175,6 +175,9 @@ def test_decomposing_gives_back_models_that_grow(community) -> None:
         # turns back into this unit's own exchange reactions.
         for exchange in model.boundary:
             exchange.lower_bound = min(exchange.lower_bound, -10.0)
+        # decompose sets no objective -- what a unit optimises alone is the
+        # caller's call -- so name the anchor before asking it to grow.
+        model.objective = model.reactions.BIO
         assert (model.slim_optimize() or 0.0) > 1e-6, f"{name} cannot grow alone"
 
 

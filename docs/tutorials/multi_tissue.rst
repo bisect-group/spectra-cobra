@@ -232,8 +232,20 @@ the tissue must keep doing to stay alive.
 that nothing runs in a tissue that is not maintaining itself. With an anchor
 running at maintenance rates the default coupling factor would throttle every
 tissue, so either raise it to suit the anchor or leave the coupling off.
-Build it, read ``coupling_summary()``, and decide with the numbers in front
-of you.
+
+Decide that with the numbers in front of you, which means building once
+*with* coupling — uncoupled, the anchors are not measured and
+``coupling_summary()`` has nothing to report but ``not coupled``:
+
+.. code-block:: python
+
+   probe = build_multi_tissue_model(gem, ..., couple=True)
+   print(probe.coupling_summary())
+
+The ``capacity`` column is the most each anchor can carry and ``cap`` is what
+the coupling then permits every reaction in that tissue. If ``cap`` comes
+back below the flux the tissue needs, raise ``coupling_factor`` or build
+without coupling, as here.
 
 ``pool_medium`` is what the pool contains at all. It is a different statement
 from ``link_bounds``, which bounds a single tissue's transport into a pool —
@@ -520,6 +532,16 @@ the union of each tissue's core reactions, tagged:
 untagged and standing on its own, with an exchange reaction wherever it met a
 pool — a transport with the pool side dropped *is* an exchange, and it keeps
 the transport's bounds, so measured rates survive the round trip.
+
+The split models carry **no objective**. What a tissue should optimise once
+it stands alone is a modelling decision rather than something the split can
+infer, so set one before you solve — ``body.biomass_reactions`` has each
+tissue's anchor if that is what you want:
+
+.. code-block:: python
+
+   for name, tissue in tissues.items():
+       tissue.objective = tissue.reactions.biomass_maintenance
 
 Always run :func:`~spectra_cobra.check_extraction`. A core reaction being
 *present* in the result is not the same as its being able to carry flux, and

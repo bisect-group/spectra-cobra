@@ -96,10 +96,21 @@ def test_the_organisms_own_exchanges_are_replaced(pair) -> None:
 def test_a_closed_community_cannot_grow(pair) -> None:
     """With the environment shut there is nothing to eat."""
     community = build_community_model(list(pair), organisms=["P", "C"])
-    for exchange in community.community_exchanges:
-        community.model.reactions.get_by_id(exchange).lower_bound = 0.0
+    model = community.model
+    # The builder sets no objective, so one has to be named or this would
+    # read zero whether or not the community is shut.
+    model.objective = {
+        model.reactions.get_by_id(community.biomass_reactions[o]): 1.0
+        for o in community.organisms
+    }
+    with model:
+        model.reactions.EX_glc_u.lower_bound = -10.0
+        assert (model.slim_optimize() or 0.0) > 1e-6, "fed, it should grow"
 
-    assert (community.model.slim_optimize() or 0.0) == pytest.approx(0.0, abs=1e-6)
+    for exchange in community.community_exchanges:
+        model.reactions.get_by_id(exchange).lower_bound = 0.0
+
+    assert (model.slim_optimize() or 0.0) == pytest.approx(0.0, abs=1e-6)
 
 
 def test_cross_feeding_through_the_shared_pool(pair) -> None:
@@ -675,25 +686,33 @@ def test_a_unit_that_merely_lost_a_tie_is_not_called_inert(solver: str, caplog) 
             [_eater("a", "glc_e", solver), _eater("b", "glc_e", solver)],
             organisms=["A", "B"],
             pool_medium={"glc_e": (-10.0, 1000.0)},
-            couple=False,
+            couple=True,
         )
 
     assert "inert" not in caplog.text, caplog.text
     assert min(community.anchor_capacity.values()) > 0.0
 
 
-def test_a_unit_that_really_is_inert_is_reported(solver: str, caplog) -> None:
+@pytest.mark.parametrize("couple", [False, True])
+def test_a_unit_that_really_is_inert_is_reported(solver, caplog, couple) -> None:
     """The contrast: nothing on offer feeds this one at all."""
     with caplog.at_level("WARNING"):
         community = build_community_model(
             [_eater("a", "glc_e", solver), _eater("b", "xyz_e", solver)],
             organisms=["A", "B"],
             pool_medium={"glc_e": (-10.0, 1000.0)},
-            couple=False,
+            couple=couple,
         )
 
-    assert "is inert" in caplog.text
-    assert community.anchor_capacity["B"] == pytest.approx(0.0, abs=1e-9)
+    if couple:
+        assert "cannot carry any flux" in caplog.text
+        assert "the unit is inert" in caplog.text
+        assert community.anchor_capacity["B"] == pytest.approx(0.0, abs=1e-9)
+    else:
+        # Uncoupled a dead anchor gates nothing, so the anchors are not
+        # measured and nothing is claimed about them.
+        assert "cannot carry any flux" not in caplog.text
+        assert community.anchor_capacity == {}
 
 
 @pytest.mark.parametrize("problem_type", ["minNetLP", "minNetMILP"])

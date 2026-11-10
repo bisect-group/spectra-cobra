@@ -127,7 +127,8 @@ class CommunityModel:
         or ``"name"``.
     anchor_capacity : dict of {str: float}
         The most flux each unit's anchor can carry in the community before
-        coupling is imposed, or empty if the check was skipped.
+        coupling is imposed. Only measured when the units are coupled and
+        something can be taken up; empty otherwise.
     draft_reactions : dict of {str: tuple of str}
         Where a database was supplied, the reactions that came from the
         unit's own model rather than from the database.
@@ -344,7 +345,10 @@ class CommunityModel:
         -------
         dict of {str: cobra.Model}
             Each unit's own network, with the tags stripped and an
-            exchange reaction wherever the unit met a pool.
+            exchange reaction wherever the unit met a pool. No objective
+            is set: what a unit should optimise on its own is a question
+            the split cannot answer, and its anchor is recorded in
+            `biomass_reactions` for a caller who wants it.
 
         Notes
         -----
@@ -392,11 +396,6 @@ class CommunityModel:
                 if metabolite.compartment and metabolite.compartment.endswith(suffix):
                     metabolite.compartment = metabolite.compartment[: -len(suffix)]
             own.repair()
-            anchor = self.biomass_reactions[organism]
-            if anchor.endswith(suffix):
-                anchor = anchor[: -len(suffix)]
-            if anchor in own.reactions:
-                own.objective = own.reactions.get_by_id(anchor)
             models[organism] = own
         return models
 
@@ -1052,8 +1051,14 @@ def build_community_model(
         `database_reactions` as candidates to gap-fill in.
     biomass_reactions : dict of {str: str}, optional
         The anchor reaction of each unit, keyed by unit (default: the
-        objective, or a reaction named ``biomass*``). Only needed when
-        `couple` is set.
+        objective, or a reaction named ``biomass*``). Every unit needs
+        one whether or not `couple` is set: the anchors are the community
+        objective, they are what :meth:`CommunityModel.decompose` restores
+        as each unit's own objective, and they are what the inertness
+        check measures. Coupling is one more use of them, not the reason
+        they exist. Pass this whenever the default cannot tell -- a model
+        with no unambiguous objective and several ``biomass*`` reactions
+        raises rather than guesses.
     shared_metabolites : iterable of str, optional
         Metabolites to leave untagged, so that every unit uses the same
         one. Rarely wanted, but a database with a single ``biomass``
@@ -1102,7 +1107,9 @@ def build_community_model(
         Flux allowed at zero anchor flux (default 0.01).
     check : bool, optional
         Whether to measure each anchor and report a coupling that would
-        throttle its unit (default True). Costs one LP.
+        throttle its unit (default True). Costs one LP per unit, and only
+        applies when `couple` is set, since an anchor that cannot carry
+        flux constrains nothing without it.
     model_id : str, optional
         The identifier of the joined model (default "community").
 
@@ -1387,21 +1394,29 @@ def build_community_model(
             "environment, or keep a demand or sink reaction inside a unit."
         )
 
-    community.objective = {
-        community.reactions.get_by_id(anchor_ids[o]): 1.0 for o in organisms
-    }
+    # No objective. Summing the anchors would assert that the units' growth
+    # rates are commensurable and that their total is the thing to maximise,
+    # which is a modelling claim the builder is in no position to make -- a
+    # community's objective is the caller's to state, and the formulations
+    # set their own anyway. Reaction copies carry no objective coefficient,
+    # so the joined model simply starts with none.
 
     capacity: Dict[str, float] = {}
     # Nothing to measure until something can be taken up. A community
     # built before its medium is applied is starved by construction, and
     # reporting every unit as inert would be noise rather than news.
+    # Only coupled. Uncoupled, a dead anchor constrains nothing -- the
+    # unit's other reactions are not gated by it -- so measuring every
+    # anchor would cost one LP per unit to report something that does not
+    # bite. Coupled it is the difference between a working unit and one
+    # pinned at zero.
     fed = any(rxn.lower_bound < 0 for rxn in community.boundary)
-    if check and not fed:
+    if check and couple and not fed:
         logger.debug(
             "no boundary reaction permits uptake, so the anchors were not "
             "measured; apply a medium and call coupling_summary() to see them"
         )
-    if check and fed:
+    if check and couple and fed:
         # The anchor flux at which coupling stops biting. Anything at or
         # above it needs no second look.
         clear_at = (
@@ -1417,12 +1432,12 @@ def build_community_model(
             if abs(value) <= 1e-9:
                 logger.warning(
                     "%s: its anchor %s cannot carry any flux even when "
-                    "maximised on its own, so the unit is inert%s",
+                    "maximised on its own, so the unit is inert -- coupling "
+                    "pins every reaction in it at zero",
                     organism,
                     anchor_ids[organism],
-                    " and, coupled, is pinned at zero" if couple else "",
                 )
-            elif couple and coupling_factor * value + coupling_threshold < 1.0:
+            elif coupling_factor * value + coupling_threshold < 1.0:
                 logger.warning(
                     "%s: anchor %s reaches at most %.3g, so coupling caps "
                     "every reaction in %s at %.3g -- raise coupling_factor "

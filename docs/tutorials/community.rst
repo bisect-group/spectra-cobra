@@ -524,6 +524,25 @@ would throttle or free that whole organism without raising anything, and a
 draft reconstruction may carry several biomass-like reactions or none that
 is named recognisably.
 
+.. note::
+
+   The anchor is not an objective. The joined model is built **without
+   one**, because summing the units' anchors would assert that their growth
+   rates are commensurable and that the total is what to maximise — a
+   modelling claim that belongs to you, not to the builder. The extraction
+   formulations set their own objective, and for anything you solve
+   yourself, say what you are maximising:
+
+   .. code-block:: python
+
+      model.objective = {
+          model.reactions.get_by_id(community.biomass_reactions[o]): 1.0
+          for o in community.organisms
+      }
+
+   The same applies after :meth:`~spectra_cobra.CommunityModel.decompose`,
+   which also leaves each unit's objective unset.
+
 Whatever is chosen is reported:
 
 .. code-block:: python
