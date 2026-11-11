@@ -235,3 +235,56 @@ def test_unmentioned_reactions_keep_the_default_weight(universal) -> None:
     )
 
     assert tuple(result.satisfied) == ("atp",)
+
+
+def test_a_medium_can_require_an_uptake_not_merely_permit_one(universal) -> None:
+    """A lower bound is a permission; forcing consumption needs both ends."""
+    from spectra_cobra.gapfilling import _apply_medium
+
+    medium = {**SALTS, "EX_glc__D_e": -10.0}
+    with universal:
+        _apply_medium(universal, medium)
+        assert universal.reactions.EX_glc__D_e.bounds == (-10.0, 1000.0)
+        # Maximising the exchange finds the least uptake the model can get
+        # away with. The ATP maintenance floor forces a little, but nothing
+        # in the medium does, so it stays well short of 8.
+        universal.objective = universal.reactions.EX_glc__D_e
+        permitted = universal.slim_optimize() or 0.0
+    assert -8.0 < permitted <= 0.0, permitted
+
+    with universal:
+        _apply_medium(universal, {**medium, "EX_glc__D_e": (-10.0, -8.0)})
+        assert universal.reactions.EX_glc__D_e.bounds == (-10.0, -8.0)
+        universal.objective = universal.reactions.EX_glc__D_e
+        required = universal.slim_optimize() or 0.0
+    # Now the least it may take up is 8, which the float form cannot say.
+    assert required <= -8.0 + 1e-6, required
+
+
+def test_a_medium_leaves_secretion_as_the_model_has_it(universal) -> None:
+    """A medium says what is available, not what may leave."""
+    from spectra_cobra.gapfilling import _apply_medium
+
+    before = universal.reactions.EX_ac_e.upper_bound
+    with universal:
+        _apply_medium(universal, {**SALTS, "EX_glc__D_e": (-10.0, -8.0)})
+        assert universal.reactions.EX_ac_e.lower_bound == 0.0
+        assert universal.reactions.EX_ac_e.upper_bound == before
+
+
+def test_bounds_the_wrong_way_round_are_refused(universal) -> None:
+    """Uptake is negative, so (5, -10) is a sign mistake worth catching."""
+    from spectra_cobra.gapfilling import _apply_medium
+
+    with pytest.raises(SpectraError, match="wrong way round"):
+        _apply_medium(universal, {"EX_glc__D_e": (5.0, -10.0)})
+
+
+def test_one_medium_is_not_mistaken_for_a_labelled_panel() -> None:
+    """A bare medium and a panel are both mappings; the values tell them apart."""
+    from spectra_cobra.gapfilling import _as_labelled
+
+    one = {"EX_glc__D_e": -10.0, "EX_o2_e": (-20.0, 0.0)}
+    assert _as_labelled(one) == [("medium_0", one)]
+    assert [label for label, _ in _as_labelled({"a": one, "b": one})] == ["a", "b"]
+    assert [label for label, _ in _as_labelled([one, one])] == ["medium_0", "medium_1"]

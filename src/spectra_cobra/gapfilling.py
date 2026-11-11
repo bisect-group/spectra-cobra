@@ -59,9 +59,15 @@ DEFAULT_MIN_GROWTH = 0.1
 #: back infeasible at every tolerance.
 GROWTH_PROBLEM_TYPES = (MIN_NET_MILP, MIN_NET_LP)
 
-#: A medium, as the lower bound to put on each exchange reaction. Anything
-#: not named is closed.
-Medium = Mapping[str, float]
+#: What a medium says about one exchange reaction: a lower bound on its
+#: own, or a ``(lower, upper)`` pair. Uptake is negative flux, so a bare
+#: ``-10`` permits taking up to 10 and a pair ``(-10, -5)`` *requires*
+#: between 5 and 10 to be taken up.
+Bound = Union[float, Tuple[float, float]]
+
+#: A medium, keyed by exchange reaction. Uptake of anything not named is
+#: closed; its secretion is left as the model has it.
+Medium = Mapping[str, Bound]
 
 
 @dataclass(frozen=True)
@@ -113,24 +119,77 @@ class GapfillResult:
 
 
 def _as_labelled(
-    media: Union[Sequence[Medium], Mapping[str, Medium]],
+    media: Union[Medium, Sequence[Medium], Mapping[str, Medium]],
 ) -> List[Tuple[str, Medium]]:
     """Return the media as (label, medium) pairs.
 
     Parameters
     ----------
-    media : sequence of dict, or dict of {str: dict}
-        The media, with or without labels.
+    media : dict, sequence of dict, or dict of {str: dict}
+        One medium, several unlabelled, or several labelled.
 
     Returns
     -------
     list of (str, dict)
         The labelled media.
 
+    Notes
+    -----
+    A single medium and a labelled panel are both mappings, so they are
+    told apart by what the values are: a panel maps a label to a medium,
+    which is itself a mapping. Deciding on the outer type alone would read
+    ``{"EX_glc_e": -10.0}`` as one medium named ``EX_glc_e`` whose content
+    is a float.
+
     """
     if isinstance(media, Mapping):
-        return list(media.items())
+        if media and all(isinstance(v, Mapping) for v in media.values()):
+            return list(media.items())
+        return [("medium_0", media)]
     return [(f"medium_{index}", medium) for index, medium in enumerate(media)]
+
+
+def _as_bounds(
+    rxn_id: str, bound: "Bound"
+) -> Tuple[float, Optional[float]]:
+    """Return one medium entry as a lower bound and an optional upper.
+
+    Parameters
+    ----------
+    rxn_id : str
+        The exchange the entry is for, for the error message.
+    bound : float, or tuple of (float, float)
+        The entry.
+
+    Returns
+    -------
+    tuple of (float, float or None)
+        The lower bound, and the upper bound if one was given.
+
+    Raises
+    ------
+    SpectraError
+        If a pair is the wrong way round, or is not a pair of numbers.
+
+    """
+    if isinstance(bound, (int, float)) and not isinstance(bound, bool):
+        return float(bound), None
+    try:
+        lower, upper = bound
+        lower, upper = float(lower), float(upper)
+    except (TypeError, ValueError) as error:
+        raise SpectraError(
+            f"The medium entry for {rxn_id!r} is {bound!r}, which is neither "
+            f"a lower bound nor a (lower, upper) pair."
+        ) from error
+    if lower > upper:
+        raise SpectraError(
+            f"The medium gives {rxn_id!r} bounds ({lower:g}, {upper:g}), "
+            f"which are the wrong way round. Uptake is negative flux, so an "
+            f"uptake of at most 10 is a lower bound of -10, and requiring "
+            f"between 5 and 10 is (-10, -5)."
+        )
+    return lower, upper
 
 
 def _apply_medium(model: "Model", medium: Medium) -> None:
@@ -140,13 +199,16 @@ def _apply_medium(model: "Model", medium: Medium) -> None:
     ----------
     model : cobra.Model
         The model to constrain, inside a ``with`` block.
-    medium : dict of {str: float}
-        The lower bound for each exchange reaction to open.
+    medium : dict of {str: float or (float, float)}
+        What to allow each exchange reaction. A float is a lower bound; a
+        pair is ``(lower, upper)`` and pins both ends, which is the only
+        way to *require* an uptake rather than permit it.
 
     Raises
     ------
     SpectraError
-        If the medium names a reaction the model does not have.
+        If the medium names a reaction the model does not have, or gives
+        bounds the wrong way round.
 
     """
     unknown = [r for r in medium if r not in model.reactions]
@@ -155,10 +217,17 @@ def _apply_medium(model: "Model", medium: Medium) -> None:
             f"The medium names {len(unknown)} reaction(s) the model does not "
             f"have, for example {sorted(unknown)[:5]}."
         )
+    # Only uptake is closed. Secretion is left as the model has it, so a
+    # medium says what is available, not what may leave.
     for reaction in model.boundary:
         reaction.lower_bound = 0.0
-    for rxn_id, lower in medium.items():
-        model.reactions.get_by_id(rxn_id).lower_bound = float(lower)
+    for rxn_id, bound in medium.items():
+        lower, upper = _as_bounds(rxn_id, bound)
+        reaction = model.reactions.get_by_id(rxn_id)
+        if upper is None:
+            reaction.lower_bound = lower
+        else:
+            reaction.bounds = (lower, upper)
 
 
 def _objective_reaction(model: "Model", given: Optional[str]) -> str:

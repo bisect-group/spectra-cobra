@@ -91,6 +91,7 @@ from optlang.symbolics import Zero
 from ._copy import subset_model
 from .exceptions import SpectraError, SpectraInfeasibleCoreError
 from .formulations import INCLUSION_CUTOFF_FACTOR
+from .gapfilling import _as_bounds
 
 if TYPE_CHECKING:
     from cobra.core import Model
@@ -216,7 +217,15 @@ class MinimalReactome:
         return "; ".join(parts)
 
 
-Medium = Mapping[str, float]
+#: What a medium says about one exchange reaction: a lower bound on its
+#: own, or a ``(lower, upper)`` pair. Uptake is negative flux, so a bare
+#: ``-10`` permits taking up to 10 and a pair ``(-10, -5)`` *requires*
+#: between 5 and 10 to be taken up.
+Bound = Union[float, Tuple[float, float]]
+
+#: A medium, keyed by exchange reaction. Uptake of anything not named is
+#: closed; its secretion is left as the model has it.
+Medium = Mapping[str, Bound]
 
 #: One medium, several unlabelled, or several labelled.
 Media = Union[Medium, Sequence[Medium], Mapping[str, Medium]]
@@ -1070,23 +1079,32 @@ def _apply_medium(model: "Model", medium: Optional[Medium]) -> None:
     ----------
     model : cobra.Model
         The model to constrain, inside a ``with`` block.
-    medium : dict of {str: float}, optional
-        The lower bound to give each exchange to open. None leaves the
-        model's own bounds alone.
+    medium : dict of {str: float or (float, float)}, optional
+        What to allow each exchange. A float is a lower bound; a pair is
+        ``(lower, upper)`` and pins both ends, which is the only way to
+        *require* an uptake rather than permit it. None leaves the model's
+        own bounds alone.
 
     """
     if medium is None:
         return
+    # Only uptake is closed. Secretion is left as the model has it, so a
+    # medium says what is available, not what may leave.
     for reaction in model.boundary:
         reaction.lower_bound = 0.0
-    for rxn_id, lower in medium.items():
+    for rxn_id, bound in medium.items():
         # The medium is validated against the model it was given for, but it
         # is applied again to the reduced one, which no longer has the
         # exchanges the minimisation found it did not need. An exchange that
         # is gone is closed, which is what the medium entry would have done
         # for it anyway.
         if rxn_id in model.reactions:
-            model.reactions.get_by_id(rxn_id).lower_bound = float(lower)
+            lower, upper = _as_bounds(rxn_id, bound)
+            reaction = model.reactions.get_by_id(rxn_id)
+            if upper is None:
+                reaction.lower_bound = lower
+            else:
+                reaction.bounds = (lower, upper)
 
 
 def _resolve_products(

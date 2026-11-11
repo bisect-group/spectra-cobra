@@ -377,9 +377,29 @@ earns its place on harder problems, where charging for a reaction growth is
 known to need pushes the solver onto a more expensive detour — the next
 section is about why those reactions are made free rather than core.
 
-A medium here is a mapping of exchange identifier to lower bound, and
+A medium here is a mapping of exchange identifier to a bound, and
 ``min_growth`` is the growth each medium must reach — a bound on biomass,
-not a tolerance, which is the distinction two sections down. Reach for the
+not a tolerance, which is the distinction two sections down.
+
+An entry can be a single number or a pair, and the difference is between
+permitting an uptake and requiring one:
+
+.. code-block:: python
+
+   medium = {
+       "EX_glc__D_e": -10.0,          # may take up to 10
+       "EX_o2_e": (-20.0, -5.0),      # must take between 5 and 20
+   }
+
+Uptake is negative flux, so a bare ``-10`` is a *lower* bound and leaves the
+model free to eat nothing at all. Only the upper half of a pair can oblige
+it to consume, which is what you want when the medium records a measured
+uptake rate rather than an availability.
+
+Either way the medium governs **uptake only**. Every exchange not named has
+its lower bound closed, but no exchange has its upper bound touched unless
+you give a pair, so secretion stays as the reconstruction has it. A medium
+says what is available, not what may leave. Reach for the
 loop when you want to vary something this does not expose; otherwise it is
 the same computation with less to get wrong.
 

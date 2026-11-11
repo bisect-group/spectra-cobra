@@ -75,8 +75,9 @@ There are four kinds of requirement, and you can combine them:
    * - Requirement
      - How it is imposed
    * - ``medium``
-     - Every exchange is closed, then the ones named are opened to the
-       given uptake rate
+     - Every exchange's uptake is closed, then the ones named are opened:
+       a number is a lower bound, permitting that much uptake, and a
+       ``(lower, upper)`` pair requires it. Secretion is left alone
    * - ``min_growth`` / ``growth_fraction``
      - A lower bound on the biomass reaction
    * - ``products``
