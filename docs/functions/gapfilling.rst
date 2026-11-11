@@ -26,6 +26,23 @@ Usage
    print(result.summary())
    print(result.added)
 
+A medium entry may be a number or a ``(lower, upper)`` pair, and the two
+say different things. Uptake is negative flux, so a bare ``-10`` is a
+lower bound — the model *may* take up to 10, and may take nothing. A pair
+pins both ends, and only a negative upper bound can oblige the model to
+consume:
+
+.. code-block:: python
+
+   medium = {
+       "EX_glc__D_e": -10.0,          # may take up to 10
+       "EX_o2_e": (-20.0, -5.0),      # must take between 5 and 20
+   }
+
+Either way a medium governs uptake only. Exchanges it does not name have
+their lower bound closed; no exchange has its upper bound touched unless
+you give it a pair, so secretion stays as the reconstruction has it.
+
 Filling a whole community at once
 ---------------------------------
 

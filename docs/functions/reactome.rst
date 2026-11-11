@@ -21,6 +21,7 @@ Usage
 
    result = minimal_reactome(
        model,
+       # A number permits an uptake; a (lower, upper) pair requires one.
        medium={"EX_glc__D_e": -10.0, "EX_o2_e": -1000.0,
                "EX_nh4_e": -1000.0, "EX_pi_e": -1000.0,
                "EX_h2o_e": -1000.0, "EX_h_e": -1000.0,

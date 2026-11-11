@@ -29,6 +29,27 @@ At a glance
 
 The inputs are read, never modified and never copied.
 
+.. note::
+
+   The joined model has **no objective**, and neither do the models
+   ``decompose`` returns. Summing the units' anchors would assert that
+   their growth rates are commensurable and that the total is the thing to
+   maximise, which is yours to decide rather than the builder's. The
+   extraction formulations set their own; for anything you solve yourself,
+   name one:
+
+   .. code-block:: python
+
+      model = community.model
+      model.objective = {
+          model.reactions.get_by_id(community.biomass_reactions[o]): 1.0
+          for o in community.organisms
+      }
+
+   ``anchor_capacity`` and the inert-unit warning follow the same rule:
+   they are only measured when ``couple=True``, since an anchor that
+   cannot carry flux gates nothing without coupling.
+
 Choosing the arguments
 ----------------------
 
@@ -50,7 +71,8 @@ Choosing the arguments
    * - ``pool_medium``
      - what the environment supplies
    * - ``link_bounds``
-     - you have measured uptake or secretion rates per unit
+     - you have measured uptake or secretion rates per unit; keyed by
+       transport reaction, ``TR_<metabolite>_<pool>__<unit>``
    * - ``biomass_reactions``
      - the anchor is not the objective and is not named ``biomass*``
    * - ``couple``
