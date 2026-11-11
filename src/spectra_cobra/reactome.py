@@ -256,9 +256,15 @@ def minimal_reactome(
     model : cobra.Model
         The model to cut down. It is not modified.
     medium : dict, sequence of dict, or dict of {str: dict}, optional
-        The exchange reactions to open and the uptake rate to allow each,
-        as a lower bound. Everything unnamed is closed. Default None,
-        meaning leave the model's own bounds alone.
+        The exchange reactions to open, each mapped to either a lower
+        bound or a ``(lower, upper)`` pair. Uptake is negative flux, so a
+        bare ``-10`` *permits* taking up to 10 and leaves the model free
+        to take nothing, while a pair pins both ends and only a negative
+        upper bound can *require* an uptake: ``(-10, -5)`` demands between
+        5 and 10. Uptake of anything unnamed is closed, and no exchange's
+        upper bound is touched unless you give it a pair, so secretion
+        stays as the model has it. Default None, meaning leave the model's
+        own bounds alone.
 
         Pass **several media** to require that the one network works in all
         of them, as a sequence or as a mapping from label to medium. Each
@@ -939,7 +945,7 @@ def _check_growth_is_possible(
     ----------
     model : cobra.Model
         The working copy, before anything is removed.
-    medium : dict of {str: float}, optional
+    medium : dict of {str: float or (float, float)}, optional
         The medium.
     biomass : str, optional
         The biomass reaction.
@@ -1055,7 +1061,7 @@ def _check_medium(model: "Model", medium: Medium) -> None:
     ----------
     model : cobra.Model
         The model the medium will be applied to.
-    medium : dict of {str: float}
+    medium : dict of {str: float or (float, float)}
         The medium.
 
     Raises
@@ -1213,7 +1219,7 @@ def _required_growth(
     ----------
     model : cobra.Model
         The working copy.
-    medium : dict of {str: float}, optional
+    medium : dict of {str: float or (float, float)}, optional
         The medium to measure the achievable rate in.
     biomass : str, optional
         The biomass reaction, if there is one.
@@ -1285,7 +1291,7 @@ def _growth_condition(
     ----------
     model : cobra.Model
         The working copy.
-    medium : dict of {str: float}, optional
+    medium : dict of {str: float or (float, float)}, optional
         The medium.
     biomass : str, optional
         The biomass reaction.
@@ -1795,7 +1801,7 @@ def _measure(
     ----------
     model : cobra.Model
         The minimal reactome.
-    medium : dict of {str: float}, optional
+    medium : dict of {str: float or (float, float)}, optional
         The medium.
     biomass : str, optional
         The biomass reaction.
@@ -1868,7 +1874,7 @@ def _keeps_without_flux(
     ----------
     model : cobra.Model
         The minimal reactome.
-    medium : dict of {str: float}, optional
+    medium : dict of {str: float or (float, float)}, optional
         The medium of this growth condition.
     biomass : str, optional
         The biomass reaction.

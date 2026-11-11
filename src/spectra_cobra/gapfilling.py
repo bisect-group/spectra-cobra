@@ -271,7 +271,7 @@ def _grows(model: "Model", medium: Medium, threshold: float) -> bool:
     ----------
     model : cobra.Model
         The model to test.
-    medium : dict of {str: float}
+    medium : dict of {str: float or (float, float)}
         The medium to apply.
     threshold : float
         The growth rate to reach.
@@ -356,7 +356,7 @@ def _inclusion_weights(
 def gapfill_for_growth(
     draft: "Model",
     universal: "Model",
-    media: Union[Sequence[Medium], Mapping[str, Medium]],
+    media: Union[Medium, Sequence[Medium], Mapping[str, Medium]],
     min_growth: Optional[float] = DEFAULT_MIN_GROWTH,
     objective_reaction: Optional[str] = None,
     tol: float = 1e-4,
@@ -375,10 +375,19 @@ def gapfill_for_growth(
     universal : cobra.Model
         The model to borrow reactions from. The draft should be a subset of
         it, in the sense that the identifiers line up.
-    media : sequence of dict, or dict of {str: dict}
-        The media to grow in, each mapping an exchange reaction to the
-        lower bound to give it. Everything unnamed is closed. Pass a
-        mapping to label them.
+    media : dict, sequence of dict, or dict of {str: dict}
+        The media to grow in. One medium maps each exchange reaction to
+        either a lower bound or a ``(lower, upper)`` pair. Uptake is
+        negative flux, so a bare ``-10`` *permits* taking up to 10 and
+        leaves the model free to take nothing, while a pair pins both ends
+        and only a negative upper bound can *require* an uptake:
+        ``(-10, -5)`` demands between 5 and 10.
+
+        A medium governs uptake only. Exchanges it does not name have
+        their lower bound closed; no exchange has its upper bound touched
+        unless you give it a pair, so secretion stays as the model has it.
+
+        Pass one medium, a sequence of them, or a mapping to label them.
     min_growth : float, optional
         The growth rate to demand, applied as a lower bound on the
         objective reaction (default 0.1). Pass None to leave the bound
