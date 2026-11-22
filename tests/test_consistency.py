@@ -151,3 +151,29 @@ def test_the_tolerances_reach_the_helpers(toy_model: Model) -> None:
     toy_model.tolerance = 1e-7
     consistent_reaction_ids(toy_model, tol=1e-4, seed=0)
     assert toy_model.solver.configuration.tolerances.feasibility == 1e-9
+
+
+def test_coupled_antiparallel_ray_completeness(solver: str) -> None:
+    """Shared iteration weights prevent coupled opposite-sense rays from stalling.
+
+    When an irreversible step drives two reversible reactions in opposite
+    senses with stoichiometric gearing > 10, independent objective draws let
+    both LPs return zero flux on ~20-25% of seeds; sharing the iteration
+    weights guarantees positive progress in every iteration.
+    """
+    from cobra import Metabolite, Reaction
+
+    model = Model("coupled_antiparallel")
+    m1, m2 = Metabolite("M1"), Metabolite("M2")
+    r1 = Reaction("R1_irr", lower_bound=0.0, upper_bound=1000.0)
+    r2 = Reaction("R2_rev", lower_bound=-1000.0, upper_bound=1000.0)
+    r3 = Reaction("R3_rev", lower_bound=-1000.0, upper_bound=1000.0)
+    model.add_reactions([r1, r2, r3])
+    r1.add_metabolites({m1: 100.0, m2: 100.0})
+    r2.add_metabolites({m1: -1.0})
+    r3.add_metabolites({m2: 1.0})
+    model.solver = solver
+
+    for seed in range(30):
+        consistent, _ = consistent_reaction_ids(model, tol=1e-4, seed=seed)
+        assert consistent == {"R1_irr", "R2_rev", "R3_rev"}

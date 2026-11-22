@@ -30,9 +30,10 @@ from optlang.interface import OPTIMAL
 from optlang.symbolics import Zero
 
 from ._copy import subset_model
-from ._lp import carrying_flux, forward, forward_cc, reverse
+from ._lp import WEIGHT_RANGE, carrying_flux, forward, forward_cc, reverse
 from ._orientation import (
     STOICHIOMETRY,
+    is_reversible,
     reaction_signs,
     relaxed_mass_balance,
     validate_consistency_type,
@@ -307,8 +308,23 @@ def _settle_core_directions(
     stalls = 0
     while unsettled:
         remaining = len(unsettled)
+        rev_ordered = sorted(
+            r
+            for r in unsettled
+            if is_reversible(model.reactions.get_by_id(r), signs[r])
+        )
+        iter_weights = dict(
+            zip(rev_ordered, rng.uniform(*WEIGHT_RANGE, size=len(rev_ordered)))
+        )
         with model:
-            fluxes = first(model, unsettled, signs, tol, rng)
+            fluxes = first(
+                model,
+                unsettled,
+                signs,
+                tol,
+                rng,
+                objective_weights=iter_weights,
+            )
         if fluxes is None:
             # Only reverse() can decline to raise; treat it as no progress.
             fluxes = {rxn.id: 0.0 for rxn in model.reactions}
@@ -318,7 +334,14 @@ def _settle_core_directions(
             break
 
         with model:
-            fluxes = second(model, unsettled, signs, tol, rng)
+            fluxes = second(
+                model,
+                unsettled,
+                signs,
+                tol,
+                rng,
+                objective_weights=iter_weights,
+            )
         if fluxes is None:
             fluxes = {rxn.id: 0.0 for rxn in model.reactions}
         accumulated = _blend(accumulated, fluxes, rng)
@@ -1077,15 +1100,33 @@ def spectra_ccme(
         previous_count = None
         while len(rxns_to_check) != previous_count:
             previous_count = len(rxns_to_check)
+            ordered = sorted(rxns_to_check)
+            iter_weights = dict(
+                zip(ordered, rng.uniform(*WEIGHT_RANGE, size=len(ordered)))
+            )
 
             with model:
-                fluxes = forward_cc(model, rxns_to_check, signs, tol, rng)
+                fluxes = forward_cc(
+                    model,
+                    rxns_to_check,
+                    signs,
+                    tol,
+                    rng,
+                    objective_weights=iter_weights,
+                )
             if fluxes is not None:
                 rxns_to_check -= carrying_flux(fluxes, cutoff)
                 accumulated = _blend(accumulated, fluxes, rng)
 
             with model:
-                fluxes = reverse(model, rxns_to_check, signs, tol, rng)
+                fluxes = reverse(
+                    model,
+                    rxns_to_check,
+                    signs,
+                    tol,
+                    rng,
+                    objective_weights=iter_weights,
+                )
             if fluxes is not None:
                 rxns_to_check -= carrying_flux(fluxes, cutoff)
                 accumulated = _blend(accumulated, fluxes, rng)

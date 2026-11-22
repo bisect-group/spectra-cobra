@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 import numpy as np
 
 from ._copy import subset_model
-from ._lp import carrying_flux, forward_cc, reverse
+from ._lp import WEIGHT_RANGE, carrying_flux, forward_cc, reverse
 from ._orientation import (
     STOICHIOMETRY,
     reaction_signs,
@@ -86,14 +86,32 @@ def consistent_reaction_ids(
         while len(rxns_to_check) != previous_count:
             previous_count = len(rxns_to_check)
             n_lps += 2
+            ordered = sorted(rxns_to_check)
+            iter_weights = dict(
+                zip(ordered, rng.uniform(*WEIGHT_RANGE, size=len(ordered)))
+            )
 
             with model:
-                fluxes = forward_cc(model, rxns_to_check, signs, tol, rng)
+                fluxes = forward_cc(
+                    model,
+                    rxns_to_check,
+                    signs,
+                    tol,
+                    rng,
+                    objective_weights=iter_weights,
+                )
             if fluxes is not None:
                 rxns_to_check -= carrying_flux(fluxes, detection_cutoff)
 
             with model:
-                fluxes = reverse(model, rxns_to_check, signs, tol, rng)
+                fluxes = reverse(
+                    model,
+                    rxns_to_check,
+                    signs,
+                    tol,
+                    rng,
+                    objective_weights=iter_weights,
+                )
             if fluxes is not None:
                 rxns_to_check -= carrying_flux(fluxes, detection_cutoff)
 

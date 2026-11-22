@@ -23,7 +23,7 @@ distribution.
 """
 
 from logging import getLogger
-from typing import TYPE_CHECKING, Dict, Iterable, Optional, Set
+from typing import TYPE_CHECKING, Dict, Iterable, Mapping, Optional, Set
 
 import numpy as np
 from optlang.interface import OPTIMAL
@@ -132,6 +132,7 @@ def _push(
     reverse: bool,
     description: str,
     raise_on_failure: bool = False,
+    objective_weights: Optional[Mapping[str, float]] = None,
 ) -> Optional[Dict[str, float]]:
     """Push the oriented flux of the given reactions towards the threshold.
 
@@ -226,8 +227,15 @@ def _push(
     to_add.reverse()
     model.objective = prob.Objective(Zero, direction="min" if reverse else "max")
     if aux_vars:
-        weights = rng.uniform(*WEIGHT_RANGE, size=len(aux_vars))
-        model.objective.set_linear_coefficients(dict(zip(aux_vars, weights)))
+        if objective_weights is not None:
+            coeffs = {
+                var: float(objective_weights[rxn_id])
+                for var, rxn_id in zip(aux_vars, rxn_ids)
+            }
+        else:
+            weights = rng.uniform(*WEIGHT_RANGE, size=len(aux_vars))
+            coeffs = dict(zip(aux_vars, weights))
+        model.objective.set_linear_coefficients(coeffs)
 
     # The LP is solved even with no auxiliary variables, because `forward`
     # pins its irreversible reactions through their bounds rather than through
@@ -241,6 +249,7 @@ def forward_cc(
     signs: Dict[str, float],
     tol: float,
     rng: np.random.Generator,
+    objective_weights: Optional[Mapping[str, float]] = None,
 ) -> Optional[Dict[str, float]]:
     """Drive as many of the given reactions as possible to positive flux.
 
@@ -260,6 +269,9 @@ def forward_cc(
         The flux threshold.
     rng : numpy.random.Generator
         The source of the objective coefficients.
+    objective_weights : mapping of {str: float}, optional
+        Pre-sampled objective coefficients keyed by reaction identifier, used
+        when sharing weights across a forward/reverse LP pair.
 
     Returns
     -------
@@ -275,6 +287,7 @@ def forward_cc(
         rng,
         reverse=False,
         description="forward consistency LP",
+        objective_weights=objective_weights,
     )
 
 
@@ -285,6 +298,7 @@ def reverse(
     tol: float,
     rng: np.random.Generator,
     raise_on_failure: bool = False,
+    objective_weights: Optional[Mapping[str, float]] = None,
 ) -> Optional[Dict[str, float]]:
     """Drive as many of the given reversible reactions as possible negative.
 
@@ -305,6 +319,9 @@ def reverse(
         The source of the objective coefficients.
     raise_on_failure : bool, optional
         Whether a non-optimal status is an error (default False).
+    objective_weights : mapping of {str: float}, optional
+        Pre-sampled objective coefficients keyed by reaction identifier, used
+        when sharing weights across a forward/reverse LP pair.
 
     Returns
     -------
@@ -327,6 +344,7 @@ def reverse(
         reverse=True,
         description="reverse LP",
         raise_on_failure=raise_on_failure,
+        objective_weights=objective_weights,
     )
 
 
@@ -336,6 +354,7 @@ def forward(
     signs: Dict[str, float],
     tol: float,
     rng: np.random.Generator,
+    objective_weights: Optional[Mapping[str, float]] = None,
 ) -> Dict[str, float]:
     """Drive the given reactions to positive flux, pinning irreversible ones.
 
@@ -402,6 +421,7 @@ def forward(
             reverse=False,
             description="forward extraction LP",
             raise_on_failure=True,
+            objective_weights=objective_weights,
         )
     except SpectraSolverError as error:
         raise SpectraInfeasibleCoreError(
