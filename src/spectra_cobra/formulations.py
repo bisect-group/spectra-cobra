@@ -956,6 +956,7 @@ def _min_net_lp_core(
     optimality_tolerance: Optional[float] = None,
     run_irls: bool = True,
     pass0_flux_ready: Optional[Union[Mapping[str, float], np.ndarray]] = None,
+    certify: bool = True,
 ) -> Tuple[Set[str], Dict[str, float], int]:
     """Run Split-Variable minNetLP (with optional IRLS + support certification)."""
     rxn_list = list(model.reactions)
@@ -1063,7 +1064,7 @@ def _min_net_lp_core(
                 prev_support = cur_support
 
     flux_map = {rxn_ids[i]: float(v_ori[i]) for i in range(n)}
-    if not run_irls:
+    if not run_irls or not certify:
         keep_mask = core_pinned_mask | (np.abs(v_ori) >= tol_cfg.supp_tol)
         kept = {rxn_ids[int(i)] for i in np.flatnonzero(keep_mask)}
         return kept, flux_map, n_lps
@@ -1172,6 +1173,7 @@ def _min_net_milp_core(
     optimality_tolerance: Optional[float] = None,
     integrality_tolerance: Optional[float] = MILP_INTEGRALITY_TOLERANCE,
     warm_start: Optional[Mapping[str, float]] = None,
+    auto_warm_start: bool = False,
 ) -> Tuple[MilpSolution, np.ndarray]:
     """Run minNetMILP and return both `MilpSolution` and continuous flux vector."""
     tol_val = _validate_positive_finite(tol, "tol")
@@ -1208,9 +1210,40 @@ def _min_net_milp_core(
 
     signs = reaction_signs(model)
     prob = model.problem
+    eff_tol = _effective_milp_feas_tol(model, feasibility_tolerance)
+
+    if warm_start is None and auto_warm_start and not previous_solutions:
+        w_warm = {rxn.id: 0.0 for rxn in model.reactions}
+        for key, members in groups.items():
+            m_list = list(members)
+            if m_list:
+                per_m = float(weights[key]) / float(len(m_list))
+                for rid in m_list:
+                    w_warm[rid] = per_m
+        try:
+            _, warm_start, _ = _min_net_lp_core(
+                model=model,
+                directions=directions,
+                weights=w_warm,
+                tol=tol_val,
+                steady_state=steady_state,
+                feasibility_tolerance=SOLVER_TOLERANCE_FLOOR
+                if feasibility_tolerance is None
+                else eff_tol,
+                optimality_tolerance=optimality_tolerance,
+                run_irls=True,
+                certify=False,
+            )
+        except SpectraSolverError:
+            warm_start = None
 
     with model, relaxed_mass_balance(model, steady_state):
         apply_direction_bounds(model, directions, signs, tol_val)
+        polished_start = (
+            _polish_milp_warm_start(model, warm_start, groups, steady_state, eff_tol)
+            if warm_start
+            else None
+        )
 
         indicators = {}
         to_add = []
@@ -1268,7 +1301,14 @@ def _min_net_milp_core(
             optimality_tolerance,
             integrality_tolerance,
         )
-        _apply_warm_start(model, warm_start, indicators, groups, tol_val)
+        _apply_warm_start(
+            model,
+            warm_start,
+            indicators,
+            groups,
+            tol_val,
+            polished=polished_start,
+        )
 
         model.slim_optimize()
         _check_status(model, "minNetMILP problem", milp=True)
@@ -1384,6 +1424,7 @@ def _trade_off_core(
     optimality_tolerance: Optional[float] = None,
     integrality_tolerance: Optional[float] = MILP_INTEGRALITY_TOLERANCE,
     warm_start: Optional[Mapping[str, float]] = None,
+    auto_warm_start: bool = False,
 ) -> Tuple[MilpSolution, np.ndarray]:
     """Run tradeOff and return both `MilpSolution` and continuous flux vector."""
     tol_val = _validate_positive_finite(tol, "tol")
@@ -1420,9 +1461,46 @@ def _trade_off_core(
 
     signs = reaction_signs(model)
     prob = model.problem
+    eff_tol = _effective_milp_feas_tol(model, feasibility_tolerance)
+
+    if warm_start is None and auto_warm_start and not previous_solutions:
+        w_warm = {rxn.id: 0.0 for rxn in model.reactions}
+        run_warm_irls = False
+        for key, members in groups.items():
+            neg_val = max(0.0, -float(weights[key]))
+            if neg_val > 0.0:
+                run_warm_irls = True
+                m_list = list(members)
+                if m_list:
+                    per_m = neg_val / float(len(m_list))
+                    for rid in m_list:
+                        w_warm[rid] = per_m
+        try:
+            _, warm_start, _ = _min_net_lp_core(
+                model=model,
+                directions=directions,
+                weights=w_warm,
+                tol=tol_val,
+                steady_state=steady_state,
+                feasibility_tolerance=SOLVER_TOLERANCE_FLOOR
+                if feasibility_tolerance is None
+                else eff_tol,
+                optimality_tolerance=optimality_tolerance,
+                run_irls=run_warm_irls,
+                certify=False,
+            )
+        except SpectraSolverError:
+            warm_start = None
 
     with model, relaxed_mass_balance(model, steady_state):
         apply_direction_bounds(model, directions, signs, tol_val)
+        polished_trade_start = (
+            _polish_trade_off_warm_start(
+                model, warm_start, groups, signs, tol_val, steady_state, eff_tol
+            )
+            if warm_start
+            else None
+        )
 
         indicators = {}
         forward_bins = {}
@@ -1517,17 +1595,17 @@ def _trade_off_core(
             optimality_tolerance,
             integrality_tolerance,
         )
-        if indicator_groups is None:
-            _apply_trade_off_warm_start(
-                model,
-                warm_start,
-                indicators,
-                groups,
-                signs,
-                forward_bins,
-                reverse_bins,
-                tol_val,
-            )
+        _apply_trade_off_warm_start(
+            model,
+            warm_start,
+            indicators,
+            groups,
+            signs,
+            forward_bins,
+            reverse_bins,
+            tol_val,
+            polished=polished_trade_start,
+        )
 
         model.slim_optimize()
         _check_status(model, "tradeOff problem", milp=True)
@@ -1826,47 +1904,289 @@ def _apply_tolerances(
             model._tolerance = val
 
 
+def _effective_milp_feas_tol(
+    model: "Model", feasibility_tolerance: Optional[float]
+) -> float:
+    """Resolve the active primal feasibility tolerance (>= 1e-9) for MILP polishing."""
+    if feasibility_tolerance is not None:
+        return max(SOLVER_TOLERANCE_FLOOR, float(feasibility_tolerance))
+    try:
+        cur = model.solver.configuration.tolerances.feasibility
+        if cur is not None:
+            return max(SOLVER_TOLERANCE_FLOOR, float(cur))
+    except Exception:  # noqa: BLE001
+        pass
+    return DEFAULT_SOLVER_TOLERANCE
+
+
+def _read_split_primals(
+    model: "Model", off_rxns: Set[str]
+) -> Dict[str, Tuple[float, float]]:
+    """Read exact `(forward, reverse)` variable primals from the current LP solution."""
+    out: Dict[str, Tuple[float, float]] = {}
+    try:
+        primals = model.solver.primal_values
+        for rxn in model.reactions:
+            if rxn.id in off_rxns:
+                out[rxn.id] = (0.0, 0.0)
+            else:
+                fv = max(0.0, float(primals[rxn.forward_variable.name]))
+                rv = max(0.0, float(primals[rxn.reverse_variable.name]))
+                out[rxn.id] = (fv, rv)
+        return out
+    except Exception:  # noqa: BLE001
+        for rxn in model.reactions:
+            if rxn.id in off_rxns:
+                out[rxn.id] = (0.0, 0.0)
+            else:
+                val = float(rxn.flux)
+                out[rxn.id] = (max(val, 0.0), max(-val, 0.0))
+        return out
+
+
+def _polish_milp_warm_start(
+    model: "Model",
+    fluxes: Mapping[str, float],
+    groups: Mapping[str, Iterable[str]],
+    steady_state: bool,
+    eff_tol: float,
+) -> Optional[Tuple[Dict[str, bool], Dict[str, Tuple[float, float]]]]:
+    """Polish a candidate flux vector so off binaries carry exact 0 flux at `eff_tol`."""
+    s_csc, col_lb, col_ub, rxn_ids, _, extra_cons = _build_network_arrays(model)
+    n = len(rxn_ids)
+    if n == 0:
+        return {}, {}
+
+    idx_of = {rid: i for i, rid in enumerate(rxn_ids)}
+    rxn_by_id = {r.id: r for r in model.reactions}
+    group_members = {key: list(members) for key, members in groups.items()}
+    v_in = np.array([float(fluxes.get(rid, 0.0)) for rid in rxn_ids], dtype=float)
+    all_cols = np.arange(n, dtype=np.int64)
+
+    cuts = (max(10.0 * eff_tol, 1e-11), 0.1 * eff_tol)
+    for cut in cuts:
+        on: Dict[str, bool] = {}
+        for key, m_list in group_members.items():
+            forced_g = any(
+                (col_lb[idx_of[r]] > 0.0) or (col_ub[idx_of[r]] < 0.0) for r in m_list
+            )
+            on[key] = forced_g or any(abs(v_in[idx_of[r]]) >= cut for r in m_list)
+
+        off_rxns = {
+            r for key, m_list in group_members.items() if not on[key] for r in m_list
+        }
+
+        v_try = v_in.copy()
+        for rid in off_rxns:
+            v_try[idx_of[rid]] = 0.0
+        v_try = np.clip(v_try, col_lb, col_ub)
+
+        if _check_row_residual(
+            s_csc, v_try, steady_state
+        ) <= 0.5 * eff_tol and _extra_constraints_satisfied(
+            model, extra_cons, all_cols, v_try, 0.5 * eff_tol
+        ):
+            split_map = {
+                rxn_ids[i]: (
+                    (0.0, 0.0)
+                    if rxn_ids[i] in off_rxns
+                    else (max(float(v_try[i]), 0.0), max(-float(v_try[i]), 0.0))
+                )
+                for i in range(n)
+            }
+            return on, split_map
+
+        with model:
+            for rid in off_rxns:
+                rxn_by_id[rid].bounds = (0.0, 0.0)
+            model.objective = model.problem.Objective(Zero, direction="min")
+            model.solver.optimize()
+            if model.solver.status == OPTIMAL:
+                return on, _read_split_primals(model, off_rxns)
+
+    return None
+
+
+def _polish_trade_off_warm_start(
+    model: "Model",
+    fluxes: Mapping[str, float],
+    groups: Mapping[str, Iterable[str]],
+    signs: Mapping[str, float],
+    tol: float,
+    steady_state: bool,
+    eff_tol: float,
+) -> Optional[
+    Tuple[
+        Dict[str, bool],
+        Dict[str, bool],
+        Dict[str, bool],
+        Dict[str, Tuple[float, float]],
+    ]
+]:
+    """Polish a candidate flux vector to satisfy tradeOff (`v_off = 0`, `|v_on| >= tol`)."""
+    s_csc, col_lb, col_ub, rxn_ids, _, extra_cons = _build_network_arrays(model)
+    n = len(rxn_ids)
+    if n == 0:
+        return {}, {}, {}, {}
+
+    idx_of = {rid: i for i, rid in enumerate(rxn_ids)}
+    rxn_by_id = {r.id: r for r in model.reactions}
+    group_members = {key: list(members) for key, members in groups.items()}
+    v_in = np.array([float(fluxes.get(rid, 0.0)) for rid in rxn_ids], dtype=float)
+    all_cols = np.arange(n, dtype=np.int64)
+
+    cuts = (0.99 * tol, max(10.0 * eff_tol, 1e-11))
+    for cut in cuts:
+        on: Dict[str, bool] = {}
+        a_on: Dict[str, bool] = {}
+        b_on: Dict[str, bool] = {}
+        lb_pol = col_lb.copy()
+        ub_pol = col_ub.copy()
+        off_rxns: Set[str] = set()
+
+        for key, m_list in group_members.items():
+            if not m_list:
+                on[key] = False
+                continue
+
+            forced_g = any(
+                (col_lb[idx_of[r]] > 0.0) or (col_ub[idx_of[r]] < 0.0) for r in m_list
+            )
+            want_g = forced_g or any(abs(v_in[idx_of[r]]) >= cut for r in m_list)
+            if not want_g:
+                on[key] = False
+                for r in m_list:
+                    i = idx_of[r]
+                    lb_pol[i] = 0.0
+                    ub_pol[i] = 0.0
+                    off_rxns.add(r)
+                    a_on[r] = False
+                    b_on[r] = False
+                continue
+
+            ok_group = True
+            chosen_ori: Dict[str, int] = {}
+            for r in m_list:
+                rxn = rxn_by_id[r]
+                sgn = signs[r]
+                lo_ori, hi_ori = oriented_bounds(rxn, sgn)
+                ori_flux = sgn * v_in[idx_of[r]]
+                if not is_reversible(rxn, sgn):
+                    if hi_ori < tol:
+                        ok_group = False
+                        break
+                    chosen_ori[r] = 1
+                else:
+                    can_f = hi_ori >= tol
+                    can_r = lo_ori <= -tol
+                    if ori_flux > 0.0 and can_f:
+                        chosen_ori[r] = 1
+                    elif ori_flux < 0.0 and can_r:
+                        chosen_ori[r] = -1
+                    elif hi_ori < 0.0 and can_r:
+                        chosen_ori[r] = -1
+                    elif can_f and not can_r:
+                        chosen_ori[r] = 1
+                    elif can_r and not can_f:
+                        chosen_ori[r] = -1
+                    elif can_f:
+                        chosen_ori[r] = 1
+                    else:
+                        ok_group = False
+                        break
+
+            if not ok_group:
+                on[key] = False
+                for r in m_list:
+                    i = idx_of[r]
+                    lb_pol[i] = 0.0
+                    ub_pol[i] = 0.0
+                    off_rxns.add(r)
+                    a_on[r] = False
+                    b_on[r] = False
+            else:
+                on[key] = True
+                for r in m_list:
+                    i = idx_of[r]
+                    rxn = rxn_by_id[r]
+                    sgn = signs[r]
+                    lo_ori, hi_ori = oriented_bounds(rxn, sgn)
+                    if not is_reversible(rxn, sgn):
+                        new_lo, new_hi = max(tol, lo_ori), hi_ori
+                        a_on[r] = False
+                        b_on[r] = False
+                    elif chosen_ori[r] > 0:
+                        new_lo, new_hi = max(tol, lo_ori), hi_ori
+                        a_on[r] = True
+                        b_on[r] = False
+                    else:
+                        new_lo, new_hi = lo_ori, min(-tol, hi_ori)
+                        a_on[r] = False
+                        b_on[r] = True
+                    if sgn > 0.0:
+                        lb_pol[i], ub_pol[i] = new_lo, new_hi
+                    else:
+                        lb_pol[i], ub_pol[i] = -new_hi, -new_lo
+
+        if np.any(lb_pol > ub_pol):
+            continue
+
+        v_try = v_in.copy()
+        for rid in off_rxns:
+            v_try[idx_of[rid]] = 0.0
+        v_try = np.clip(v_try, lb_pol, ub_pol)
+        if _check_row_residual(
+            s_csc, v_try, steady_state
+        ) <= 0.5 * eff_tol and _extra_constraints_satisfied(
+            model, extra_cons, all_cols, v_try, 0.5 * eff_tol
+        ):
+            split_map = {
+                rxn_ids[i]: (
+                    (0.0, 0.0)
+                    if rxn_ids[i] in off_rxns
+                    else (max(float(v_try[i]), 0.0), max(-float(v_try[i]), 0.0))
+                )
+                for i in range(n)
+            }
+            return on, a_on, b_on, split_map
+
+        with model:
+            for i, rid in enumerate(rxn_ids):
+                rxn_by_id[rid].bounds = (float(lb_pol[i]), float(ub_pol[i]))
+            model.objective = model.problem.Objective(Zero, direction="min")
+            model.solver.optimize()
+            if model.solver.status == OPTIMAL:
+                return on, a_on, b_on, _read_split_primals(model, off_rxns)
+
+    return None
+
+
 def _apply_warm_start(
     model: "Model",
     fluxes: Optional[Mapping[str, float]],
     indicators: Mapping[str, "object"],
     groups: Mapping[str, Iterable[str]],
     tol: float,
+    polished: Optional[Tuple[Dict[str, bool], Dict[str, Tuple[float, float]]]] = None,
 ) -> bool:
     """Hand the solver a clean feasible starting point for minNetMILP."""
-    if not fluxes:
+    if not fluxes or polished is None:
         logger.warning(
             "no warm start: the solver must find its own first feasible "
             "solution, which it may not manage at this size"
         )
         return False
 
-    threshold = min(1e-12, tol * INCLUSION_CUTOFF_FACTOR)
-    group_members = {key: list(members) for key, members in groups.items()}
-    on = {
-        key: any(abs(fluxes.get(rxn_id, 0.0)) > threshold for rxn_id in members)
-        for key, members in group_members.items()
-    }
-    off_rxns = {
-        rxn_id
-        for key, members in group_members.items()
-        if not on[key]
-        for rxn_id in members
-    }
+    on, split_primals = polished
     try:
         for key, variable in indicators.items():
-            variable._internal_variable.setAttr("Start", 1.0 if on[key] else 0.0)
+            variable._internal_variable.setAttr(
+                "Start", 1.0 if on.get(key, False) else 0.0
+            )
         for reaction in model.reactions:
-            flux = fluxes.get(reaction.id)
-            if flux is None:
-                continue
-            cleaned = 0.0 if reaction.id in off_rxns else float(flux)
-            reaction.forward_variable._internal_variable.setAttr(
-                "Start", max(cleaned, 0.0)
-            )
-            reaction.reverse_variable._internal_variable.setAttr(
-                "Start", max(-cleaned, 0.0)
-            )
+            fv, rv = split_primals.get(reaction.id, (0.0, 0.0))
+            reaction.forward_variable._internal_variable.setAttr("Start", fv)
+            reaction.reverse_variable._internal_variable.setAttr("Start", rv)
         model.solver.problem.update()
     except (AttributeError, TypeError, ValueError) as error:
         logger.warning(
@@ -1894,53 +2214,41 @@ def _apply_trade_off_warm_start(
     forward_bins: Mapping[str, "object"],
     reverse_bins: Mapping[str, "object"],
     tol: float,
+    polished: Optional[
+        Tuple[
+            Dict[str, bool],
+            Dict[str, bool],
+            Dict[str, bool],
+            Dict[str, Tuple[float, float]],
+        ]
+    ] = None,
 ) -> bool:
-    """Hand the solver a clean feasible starting point (`|x0| >= 0.99 * tol`) for tradeOff."""
-    if not fluxes:
+    """Hand the solver a clean feasible starting point for tradeOff."""
+    if not fluxes or polished is None:
         logger.warning(
             "no warm start: the solver must find its own first feasible "
             "solution, which it may not manage at this size"
         )
         return False
 
-    threshold = 0.99 * tol
-    group_members = {key: list(members) for key, members in groups.items()}
-    on = {
-        key: all(abs(fluxes.get(rxn_id, 0.0)) >= threshold for rxn_id in members)
-        for key, members in group_members.items()
-    }
-    off_rxns = {
-        rxn_id
-        for key, members in group_members.items()
-        if not on[key]
-        for rxn_id in members
-    }
+    on, a_on, b_on, split_primals = polished
     try:
         for key, variable in indicators.items():
-            variable._internal_variable.setAttr("Start", 1.0 if on[key] else 0.0)
+            variable._internal_variable.setAttr(
+                "Start", 1.0 if on.get(key, False) else 0.0
+            )
         for rxn_id, a_var in forward_bins.items():
-            ori = signs[rxn_id] * float(fluxes.get(rxn_id, 0.0))
-            is_on = rxn_id not in off_rxns
             a_var._internal_variable.setAttr(
-                "Start", 1.0 if (is_on and ori >= threshold) else 0.0
+                "Start", 1.0 if a_on.get(rxn_id, False) else 0.0
             )
         for rxn_id, b_var in reverse_bins.items():
-            ori = signs[rxn_id] * float(fluxes.get(rxn_id, 0.0))
-            is_on = rxn_id not in off_rxns
             b_var._internal_variable.setAttr(
-                "Start", 1.0 if (is_on and ori <= -threshold) else 0.0
+                "Start", 1.0 if b_on.get(rxn_id, False) else 0.0
             )
         for reaction in model.reactions:
-            flux = fluxes.get(reaction.id)
-            if flux is None:
-                continue
-            cleaned = 0.0 if reaction.id in off_rxns else float(flux)
-            reaction.forward_variable._internal_variable.setAttr(
-                "Start", max(cleaned, 0.0)
-            )
-            reaction.reverse_variable._internal_variable.setAttr(
-                "Start", max(-cleaned, 0.0)
-            )
+            fv, rv = split_primals.get(reaction.id, (0.0, 0.0))
+            reaction.forward_variable._internal_variable.setAttr("Start", fv)
+            reaction.reverse_variable._internal_variable.setAttr("Start", rv)
         model.solver.problem.update()
     except (AttributeError, TypeError, ValueError) as error:
         logger.warning(

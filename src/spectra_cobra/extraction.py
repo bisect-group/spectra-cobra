@@ -280,36 +280,6 @@ def _assert_core_progress(
     return stalls
 
 
-def _optional_warm_start(
-    model: "Model",
-    steady_state: bool,
-    directions: Optional[Dict[str, int]] = None,
-    signs: Optional[Dict[str, float]] = None,
-    tol: float = 1e-4,
-) -> Optional[Dict[str, float]]:
-    """Find an optional feasible/FBA flux vector for MILP warm-starting."""
-    has_pinned = bool(directions and any(d != 0 for d in directions.values()))
-    obj_coefs = {
-        rxn: coef for rxn, coef in linear_reaction_coefficients(model).items() if coef
-    }
-    with model, relaxed_mass_balance(model, steady_state):
-        if has_pinned and directions is not None and signs is not None:
-            apply_direction_bounds(model, directions, signs, tol)
-        if not obj_coefs or has_pinned:
-            model.objective = model.problem.Objective(Zero, direction="max")
-        model.slim_optimize()
-        if model.solver.status != OPTIMAL:
-            if not has_pinned:
-                logger.warning(
-                    "No feasible flux distribution to start the mixed-integer "
-                    "solve from: the solver returned %r. Continuing without a "
-                    "warm start.",
-                    model.solver.status,
-                )
-            return None
-        return {rxn.id: float(rxn.flux) for rxn in model.reactions}
-
-
 def _discover_core_directions(
     model: "Model",
     core_ids: Set[str],
@@ -605,6 +575,7 @@ def _solve_formulation(
             optimality_tolerance=optimality_tolerance,
             integrality_tolerance=integrality_tolerance,
             warm_start=warm_start,
+            auto_warm_start=True,
         )
         return sol, v_arr, 0
 
@@ -623,6 +594,7 @@ def _solve_formulation(
         optimality_tolerance=optimality_tolerance,
         integrality_tolerance=integrality_tolerance,
         warm_start=warm_start,
+        auto_warm_start=True,
     )
     return sol, v_arr, 0
 
@@ -861,19 +833,6 @@ def _spectra_me(
         core_is_known_live=core_is_known_live,
     )
 
-    zero_feas = not any(d != 0 for d in directions.values()) and _zero_flux_is_feasible(
-        model, steady_state
-    )
-    if (
-        witness_flux is None
-        and not exclude
-        and not zero_feas
-        and problem_type in MILP_PROBLEM_TYPES
-    ):
-        witness_flux = _optional_warm_start(
-            model, steady_state, directions=directions, signs=signs, tol=tol_cfg.tol
-        )
-
     try:
         solution, _, _ = _solve_formulation(
             model=model,
@@ -890,7 +849,7 @@ def _spectra_me(
             feasibility_tolerance=feasibility_tolerance,
             optimality_tolerance=optimality_tolerance,
             integrality_tolerance=integrality_tolerance,
-            warm_start=witness_flux,
+            warm_start=None,
             pass0_flux_ready=pass0_flux_ready,
         )
     except SpectraSolverError as err:
@@ -923,7 +882,7 @@ def _spectra_me(
             return models, found
 
         for _ in range(1, n_solutions):
-            dir_j, witness_j, _, _ = _discover_core_directions(
+            dir_j, _, _, _ = _discover_core_directions(
                 model=model,
                 core_ids=core_ids,
                 signs=signs,
@@ -956,7 +915,7 @@ def _spectra_me(
                     feasibility_tolerance=feasibility_tolerance,
                     optimality_tolerance=optimality_tolerance,
                     integrality_tolerance=integrality_tolerance,
-                    warm_start=witness_j,
+                    warm_start=None,
                     pass0_flux_ready=None,
                 )
             except SpectraSolverError as err:
@@ -1441,21 +1400,6 @@ def _run_ccme_single_extraction(
     core_pinned_mask = np.array(
         [directions.get(rid, 0) != 0 for rid in rxn_ids], dtype=bool
     )
-    zero_feas = (not np.any(core_pinned_mask)) and _zero_flux_is_feasible(
-        work_model, steady_state
-    )
-
-    warm = witness_flux
-    if (
-        warm is None
-        and not previous_solutions
-        and not zero_feas
-        and problem_type in MILP_PROBLEM_TYPES
-    ):
-        signs_work = reaction_signs(work_model)
-        warm = _optional_warm_start(
-            work_model, steady_state, directions=directions, signs=signs_work, tol=tol
-        )
 
     if problem_type == MIN_NET_LP:
         try:
@@ -1539,7 +1483,7 @@ def _run_ccme_single_extraction(
         feasibility_tolerance=feasibility_tolerance,
         optimality_tolerance=optimality_tolerance,
         integrality_tolerance=integrality_tolerance,
-        warm_start=warm,
+        warm_start=None,
     )
     if not sol.included:
         return sol

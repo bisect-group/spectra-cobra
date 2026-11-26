@@ -942,3 +942,47 @@ def test_with_chain_weights_penalise_long_unbranched_chain_in_min_net_lp(
     kept = min_net_lp(model, {"OUT": 1}, w, 1e-4, steady_state=True)
     assert kept == {"IN", "SHORT", "OUT"}
 
+
+def test_milp_warm_starts_cover_empty_core_and_tradeoff_groups(
+    toy_model: Model, solver: str, caplog
+) -> None:
+    """Empty-core forced bounds and grouped tradeOff MILPs compute sparse LP warm starts."""
+    import logging
+    from optlang.symbolics import Zero
+    from spectra_cobra import MIN_NET_MILP, TRADE_OFF, spectra_me
+
+    if solver != "gurobi":
+        pytest.skip("only the gurobi interface exposes a starting point")
+
+    # 1. Empty core + zero objective + forced lower bound on R5
+    with toy_model:
+        toy_model.objective = toy_model.problem.Objective(Zero, direction="max")
+        toy_model.reactions.R5.lower_bound = 0.1
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="spectra_cobra.formulations"):
+            sub = spectra_me(toy_model, [], tol=1e-4, problem_type=MIN_NET_MILP, seed=0)
+        assert "R5" in sub.reactions
+        assert any("binaries begin switched on" in r.message for r in caplog.records)
+
+    # 2. Grouped tradeOff MILP with signed weights
+    groups = {
+        "route_1": ["R1", "R2", "R3", "R4"],
+        "route_2": ["R6", "R7", "R8"],
+        "route_3": ["R9", "R10", "R11"],
+    }
+    weights = {"route_1": -3.0, "route_2": 5.0, "route_3": -2.0}
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="spectra_cobra.formulations"):
+        sub_to = spectra_me(
+            toy_model,
+            ["R5"],
+            tol=1e-4,
+            weights=weights,
+            problem_type=TRADE_OFF,
+            indicator_groups=groups,
+            seed=0,
+        )
+    assert {r.id for r in sub_to.reactions} == {"R5", "R6", "R7", "R8"}
+    assert any("binaries begin switched on" in r.message for r in caplog.records)
+
+

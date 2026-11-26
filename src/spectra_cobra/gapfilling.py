@@ -610,7 +610,9 @@ def gapfill_for_tasks(
                         problem_type=problem_type,
                     )
                     zero_dirs = {r.id: 0 for r in constrained.reactions}
-                    solution = min_net_milp(
+                    from .formulations import _min_net_milp_core
+
+                    solution, _ = _min_net_milp_core(
                         constrained,
                         zero_dirs,
                         repair_cost,
@@ -620,6 +622,7 @@ def gapfill_for_tasks(
                         feasibility_tolerance=DEFAULT_SOLVER_TOLERANCE,
                         optimality_tolerance=DEFAULT_SOLVER_TOLERANCE,
                         integrality_tolerance=DEFAULT_SOLVER_TOLERANCE,
+                        auto_warm_start=True,
                     )
             except (SpectraSolverError, SpectraError) as error:
                 failed[result.task.id] = f"{type(error).__name__}: {error}"
