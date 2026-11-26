@@ -608,7 +608,7 @@ four ways:
      - minimise weighted reaction count
      - non-negative
      - 1 MILP
-   * - ``"growthOptim"``
+   * - ``"optimBiomass"``
      - maximise objective flux minus weighted flux
      - non-negative
      - 1 LP

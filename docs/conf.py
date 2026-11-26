@@ -33,13 +33,29 @@ graphviz_output_format = "svg"
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
-html_theme = "sphinx_rtd_theme"
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
+import sphinx
+
+_use_rtd = True
+if sphinx.version_info >= (7,):
+    try:
+        _rtd_ver = _pkg_version("sphinx-rtd-theme")
+        if int(_rtd_ver.split(".", 1)[0]) < 2:
+            _use_rtd = False
+    except (PackageNotFoundError, ValueError):
+        _use_rtd = False
+
 html_static_path = ["_static"]
 html_title = f"{project} {release}"
-html_theme_options = {
-    "collapse_navigation": False,
-    "navigation_depth": 3,
-}
+if _use_rtd:
+    html_theme = "sphinx_rtd_theme"
+    html_theme_options = {
+        "collapse_navigation": False,
+        "navigation_depth": 3,
+    }
+else:
+    html_theme = "alabaster"
+    html_theme_options = {}
 
 # Numpydoc-style docstrings, which is what the package uses.
 napoleon_google_docstring = False

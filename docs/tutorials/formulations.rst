@@ -14,9 +14,9 @@ together.
      - Weights
      - Solves
    * - ``"minNetLP"``
-     - minimise weighted total absolute flux
+     - minimise weighted total absolute flux (IRLS)
      - non-negative
-     - 1 LP
+     - 1–5 LPs
    * - ``"minNetMILP"``
      - minimise weighted reaction count
      - non-negative
@@ -25,7 +25,7 @@ together.
      - maximise net weight: positive in, negative out
      - **any real**
      - 1 MILP
-   * - ``"growthOptim"``
+   * - ``"optimBiomass"``
      - maximise objective flux minus weighted flux
      - non-negative
      - 1 LP
@@ -41,16 +41,16 @@ Seeing the difference
    model = load_model("textbook")
    consistent = spectra_cc(model, tol=1e-3)
 
-   for problem_type in ("minNetLP", "minNetMILP", "growthOptim", "tradeOff"):
+   for problem_type in ("minNetLP", "minNetMILP", "optimBiomass", "tradeOff"):
        extracted = spectra_me(consistent, ["PGI"], tol=1e-3,
                               problem_type=problem_type, seed=0)
        print(f"{problem_type:<12} {len(extracted.reactions):>3} reactions")
 
 .. code-block:: text
 
-   minNetLP      27 reactions
+   minNetLP      32 reactions
    minNetMILP    16 reactions
-   growthOptim   27 reactions
+   optimBiomass  27 reactions
    tradeOff      87 reactions
 
 Four very different models from the same core set. The spread is the point:
@@ -59,13 +59,15 @@ these are not four implementations of one idea.
 minNetLP, the default
 ---------------------
 
-Minimises :math:`\sum_i w_i t_i` subject to :math:`t_i \ge |v_i|` — an L1
-relaxation of minimising the reaction count. One LP, so it is by far the
-cheapest and the only one that is practical to run hundreds of times.
+Minimises weighted absolute flux using "With-Chain" median-normalised
+non-negative weights and warm-started Split-Variable IRLS as an LP relaxation
+of minimising the reaction count. Purely LP-based, so it is by far the
+cheapest and scales effortlessly to hundreds of genome-scale runs.
 
-The catch is in the relaxation. L1 favours many small fluxes over a few large
-ones, so it tends to keep more reactions than strictly necessary: 27 here
-against the true minimum of 16.
+The catch is in the relaxation. Even with chain-length normalisation and IRLS
+refinement, an LP relaxation can keep more reactions than the exact integer
+optimum when maintenance flux dominates: 32 here against the true minimum of
+16.
 
 minNetMILP, the exact one
 -------------------------
@@ -73,7 +75,7 @@ minNetMILP, the exact one
 Gives each candidate reaction a binary :math:`z_i` tied to its flux by
 :math:`lb_i z_i \le v_i \le ub_i z_i`, so :math:`z_i = 0` pins the flux to
 zero, and minimises :math:`\sum_i w_i z_i`. That is the reaction count itself,
-not a relaxation, which is why it finds 16 where ``minNetLP`` finds 27.
+not a relaxation, which is why it finds 16 where ``minNetLP`` finds 32.
 
 It is a MILP. On the textbook model that is instant; on a genome-scale model
 it does not finish at all, so use Gurobi or CPLEX and cap the effort with
@@ -119,8 +121,8 @@ keeps essentially the whole model. **``tradeOff`` with default weights is not
 a useful call** — it only does something meaningful once the weights carry
 both signs.
 
-growthOptim, for growth
------------------------
+optimBiomass, for growth
+------------------------
 
 Maximises :math:`\sum_{i \in c} w_i v_i - \sum_{i \notin c} w_i t_i`, where
 :math:`c` are the reactions in ``model.objective``: reward the objective flux,
@@ -131,8 +133,9 @@ The reward on an objective reaction is its *weight*, not its coefficient in
 ``model.objective`` — the objective is used only to find which reactions those
 are, so the weight is what controls the trade-off. And unlike the other
 formulations it charges for the absolute flux of *every* non-objective
-reaction, core reactions included, not just the ones it is free to drop. A
-model with no objective raises :class:`~spectra_cobra.SpectraError`.
+reaction, core reactions included, not just the ones it is free to drop. If
+``model.objective`` has no nonzero coefficients, ``optimBiomass`` reduces
+cleanly to weighted L1 flux minimisation.
 
 .. warning::
 
@@ -149,40 +152,40 @@ model with no objective raises :class:`~spectra_cobra.SpectraError`.
           weights["Biomass_Ecoli_core"] = weight
           extracted = spectra_me(consistent, ["PGI"], tol=1e-3,
                                  weights=weights,
-                                 problem_type="growthOptim", seed=0)
+                                 problem_type="optimBiomass", seed=0)
           print(f"{weight:>7g} {len(extracted.reactions):>3} reactions, "
                 f"growth {extracted.slim_optimize():.4f}")
 
    .. code-block:: text
 
          1  27 reactions, growth 0.0000
-       100  27 reactions, growth 0.0000
+       100  48 reactions, growth 0.8739
       1000  48 reactions, growth 0.8739
       5000  48 reactions, growth 0.8739
 
-   Below roughly 1000 the biomass reaction is not even kept and the result is
-   indistinguishable from ``minNetLP``; above it, growth jumps straight to the
-   unconstrained maximum of 0.8739 and the model gains the 21 reactions needed
+   When the weight is too small the biomass reaction is not even kept; once it
+   exceeds the flux cost of growing, growth jumps straight to the
+   unconstrained maximum of 0.8739 and the model gains the reactions needed
    to support it. **Always check that the extracted model actually grows**
    rather than assuming the formulation arranged it:
 
    .. code-block:: python
 
-      assert extracted.slim_optimize() > 0, "growthOptim produced a dead model"
+      assert extracted.slim_optimize() > 0, "optimBiomass produced a dead model"
 
-   A weight of 10 would also do here, but only because this toy model
-   carries fluxes of order one; scale it to your own model's fluxes.
+   Scale the weight to your own model's fluxes.
 
 Which one should I use?
 -----------------------
 
-* **Start with ``minNetLP``.** It is the default, it is one LP, and for most
-  purposes a slightly larger model is not a problem.
+* **Start with ``minNetLP``.** It is the default, it solves a handful of
+  warm-started LPs, and for most purposes a slightly larger model is not a
+  problem.
 * **Use ``minNetMILP``** when the model size is the result you care about, and
   you can afford a MILP.
 * **Use ``tradeOff``** when you have signed evidence. Do not use it with
   default weights.
-* **Use ``growthOptim``** when growth belongs in the objective. Any of them
+* **Use ``optimBiomass``** when growth belongs in the objective. Any of them
   can return a growing model — put biomass in the core set, or bound it —
   but this is the one that trades biomass off against flux.
 

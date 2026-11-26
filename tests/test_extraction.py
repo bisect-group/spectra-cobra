@@ -7,15 +7,18 @@ import pytest
 from cobra import Model
 
 from spectra_cobra import (
-    GROWTH_OPTIM,
+    CORE_DIRECTION,
     MIN_NET_LP,
     MIN_NET_MILP,
+    OPTIM_BIOMASS,
     PATHWAY_EXCLUSION,
     TRADE_OFF,
     SpectraError,
     SpectraInfeasibleCoreError,
+    SpectraValueError,
     spectra_ccme,
     spectra_me,
+    spectra_me2,
 )
 
 #: Every formulation that takes non-negative weights, i.e. all but tradeOff.
@@ -102,18 +105,26 @@ def test_trade_off_accepts_negative_weights(toy_model: Model) -> None:
     assert not {"R7", "R8", "R10", "R11"} & _ids(extracted)
 
 
-def test_growth_optim_keeps_a_growing_network(toy_model: Model) -> None:
-    """growthOptim retains a route to the objective reaction."""
-    extracted = spectra_me(toy_model, ["R3"], problem_type=GROWTH_OPTIM, seed=0)
+def test_optim_biomass_keeps_a_growing_network(toy_model: Model) -> None:
+    """optimBiomass retains a route to the objective reaction, and growthOptim is removed."""
+    extracted = spectra_me(toy_model, ["R3"], problem_type=OPTIM_BIOMASS, seed=0)
     assert "R5" in _ids(extracted)
     assert {"R1", "R2", "R3", "R4"} <= _ids(extracted)
+    ccme_ex, blocked = spectra_ccme(
+        toy_model, ["R3"], problem_type=OPTIM_BIOMASS, seed=0
+    )
+    assert blocked == []
+    assert _ids(ccme_ex) == _ids(extracted)
+
+    with pytest.raises((SpectraValueError, ValueError)):
+        spectra_me(toy_model, ["R3"], problem_type="growthOptim", seed=0)
 
 
-def test_growth_optim_needs_an_objective(toy_model: Model) -> None:
-    """growthOptim without an objective reaction is an error."""
+def test_optim_biomass_without_objective_reduces_to_l1(toy_model: Model) -> None:
+    """optimBiomass without an objective reduces cleanly to L1 flux minimisation."""
     toy_model.objective = toy_model.problem.Objective(0)
-    with pytest.raises(SpectraError, match="objective"):
-        spectra_me(toy_model, ["R3"], problem_type=GROWTH_OPTIM, seed=0)
+    extracted = spectra_me(toy_model, ["R3"], problem_type=OPTIM_BIOMASS, seed=0)
+    assert _ids(extracted) == {"R1", "R2", "R3", "R4", "R5"}
 
 
 def test_blocked_core_reaction_raises(blocked_model: Model) -> None:
@@ -388,7 +399,7 @@ def test_lp_weights_follow_the_reaction_not_the_iteration_order(
 # now has to be carried deliberately, so each of those things is pinned here.
 # --------------------------------------------------------------------------
 
-ALL_PROBLEM_TYPES = (MIN_NET_LP, MIN_NET_MILP, GROWTH_OPTIM, TRADE_OFF)
+ALL_PROBLEM_TYPES = (MIN_NET_LP, MIN_NET_MILP, OPTIM_BIOMASS, TRADE_OFF)
 
 
 def _decorate(model: Model) -> Model:
@@ -635,14 +646,16 @@ def _settler(monkeypatch, forward_settles, reverse_settles):
     return rounds
 
 
+def _make_reversible_core_toy(toy_model: Model, core_ids: set) -> None:
+    """Give `core_ids` two-way bounds (-10, 10) so Stage-1 iterative settling runs."""
+    for rid in core_ids:
+        toy_model.reactions.get_by_id(rid).bounds = (-10.0, 10.0)
+
+
 def test_a_round_the_reverse_lp_cannot_move_is_not_a_failure(
     toy_model: Model, monkeypatch
 ) -> None:
-    """Progress by the forward LP carries the round.
-
-    The loop used to raise whenever the reverse LP settled nothing, even
-    though the forward LP had just settled reactions in the same round.
-    """
+    """Progress by the forward LP carries the round."""
     from spectra_cobra import extraction
 
     rounds = _settler(
@@ -651,11 +664,24 @@ def test_a_round_the_reverse_lp_cannot_move_is_not_a_failure(
         reverse_settles=lambda left, _n: [],         # never anything
     )
     core = {"R1", "R2", "R3"}
-    fluxes = extraction._settle_core_directions(
-        toy_model, set(core), {r.id: 1.0 for r in toy_model.reactions},
-        1e-4, np.random.default_rng(0),
+    _make_reversible_core_toy(toy_model, core)
+    weights = {r.id: 1.0 for r in toy_model.reactions}
+    directions, fluxes, _, _ = extraction._discover_core_directions(
+        model=toy_model,
+        core_ids=set(core),
+        signs={r.id: 1.0 for r in toy_model.reactions},
+        all_weights=weights,
+        problem_type=MIN_NET_LP,
+        tol=1e-4,
+        steady_state=True,
+        inclusion_cutoff=None,
+        feasibility_tolerance=1e-9,
+        optimality_tolerance=1e-9,
+        lock_tol=0.99e-4,
+        rng=np.random.default_rng(0),
     )
     assert fluxes is not None
+    assert all(directions[r] != 0 for r in core)
     assert rounds["forward"] == len(core), (
         "one round per core reaction, so the loop kept going"
     )
@@ -673,10 +699,22 @@ def test_a_core_that_never_settles_is_still_an_error(
         forward_settles=lambda left, _n: [],
         reverse_settles=lambda left, _n: [],
     )
+    _make_reversible_core_toy(toy_model, {"R1"})
+    weights = {r.id: 1.0 for r in toy_model.reactions}
     with pytest.raises(SpectraError, match="could not be given a flux"):
-        extraction._settle_core_directions(
-            toy_model, {"R1"}, {r.id: 1.0 for r in toy_model.reactions},
-            1e-4, np.random.default_rng(0),
+        extraction._discover_core_directions(
+            model=toy_model,
+            core_ids={"R1"},
+            signs={r.id: 1.0 for r in toy_model.reactions},
+            all_weights=weights,
+            problem_type=MIN_NET_LP,
+            tol=1e-4,
+            steady_state=True,
+            inclusion_cutoff=None,
+            feasibility_tolerance=1e-9,
+            optimality_tolerance=1e-9,
+            lock_tol=0.99e-4,
+            rng=np.random.default_rng(0),
         )
     assert rounds["forward"] == extraction.DIRECTION_ATTEMPTS + 1
 
@@ -691,18 +729,44 @@ def test_the_failure_only_blames_the_model_when_that_is_possible(
     _settler(monkeypatch,
              forward_settles=lambda left, _n: [],
              reverse_settles=lambda left, _n: [])
+    _make_reversible_core_toy(toy_model, {"R1"})
     signs = {r.id: 1.0 for r in toy_model.reactions}
+    weights = {r.id: 1.0 for r in toy_model.reactions}
 
     with pytest.raises(SpectraError) as unchecked:
-        extraction._settle_core_directions(
-            toy_model, {"R1"}, signs, 1e-4, np.random.default_rng(0))
+        extraction._discover_core_directions(
+            model=toy_model,
+            core_ids={"R1"},
+            signs=signs,
+            all_weights=weights,
+            problem_type=MIN_NET_LP,
+            tol=1e-4,
+            steady_state=True,
+            inclusion_cutoff=None,
+            feasibility_tolerance=1e-9,
+            optimality_tolerance=1e-9,
+            lock_tol=0.99e-4,
+            rng=np.random.default_rng(0),
+        )
     assert "blocked in the model as given" in str(unchecked.value)
     assert "another seed" in str(unchecked.value)
 
     with pytest.raises(SpectraError) as checked:
-        extraction._settle_core_directions(
-            toy_model, {"R1"}, signs, 1e-4, np.random.default_rng(0),
-            core_is_known_live=True)
+        extraction._discover_core_directions(
+            model=toy_model,
+            core_ids={"R1"},
+            signs=signs,
+            all_weights=weights,
+            problem_type=MIN_NET_LP,
+            tol=1e-4,
+            steady_state=True,
+            inclusion_cutoff=None,
+            feasibility_tolerance=1e-9,
+            optimality_tolerance=1e-9,
+            lock_tol=0.99e-4,
+            rng=np.random.default_rng(0),
+            core_is_known_live=True,
+        )
     assert "blocked in the model as given" not in str(checked.value)
 
 
@@ -766,3 +830,232 @@ def test_spectra_ccme_forwards_the_tolerances(toy_model: Model) -> None:
     tolerances = toy_model.solver.configuration.tolerances
     assert tolerances.feasibility == 1e-9
     assert tolerances.integrality == 1e-9
+
+
+# --------------------------------------------------------------------------
+# v2 parity tests: default alt_solution_method, 0-LP skips, signed tradeOff
+# w_anchor, spectra_me2, reverse-irreversible preservation, and mutual core
+# conflict warning in spectra_ccme.
+# --------------------------------------------------------------------------
+
+
+def test_default_alt_solution_method_by_formulation_class(toy_model: Model) -> None:
+    """Omitting alt_solution_method defaults to pathwayExclusion for MILP and coreDirection for LP."""
+    # MILP defaults to pathwayExclusion -> 3 distinct pathways to R5
+    milp_models = spectra_me(
+        toy_model, ["R5"], n_solutions=3, problem_type=MIN_NET_MILP, seed=0
+    )
+    assert len({frozenset(_ids(m)) for m in milp_models}) == 3
+
+    ccme_milp, blocked = spectra_ccme(
+        toy_model, ["R5"], n_solutions=3, problem_type=MIN_NET_MILP, seed=0
+    )
+    assert blocked == []
+    assert len({frozenset(_ids(m)) for m in ccme_milp}) == 3
+
+    # LP defaults to coreDirection
+    lp_models = spectra_me(
+        toy_model, ["R5"], n_solutions=2, problem_type=MIN_NET_LP, seed=0
+    )
+    assert len(lp_models) == 2
+
+    # alt_solution_method is only validated when n_solutions > 1
+    single = spectra_me(
+        toy_model,
+        ["R3"],
+        n_solutions=1,
+        alt_solution_method="pathwayExclusion",
+        problem_type=MIN_NET_LP,
+        seed=0,
+    )
+    assert "R3" in _ids(single)
+
+
+def test_pathway_exclusion_stops_when_all_trade_off_weights_are_negative(
+    toy_model: Model,
+) -> None:
+    """When all tradeOff weights are negative and selected is empty, pathwayExclusion stops cleanly."""
+    neg_weights = {r.id: -1.0 for r in toy_model.reactions}
+    models = spectra_me(
+        toy_model,
+        [],
+        weights=neg_weights,
+        n_solutions=3,
+        problem_type=TRADE_OFF,
+        seed=0,
+    )
+    assert len(models) == 1
+    assert len(models[0].reactions) == 0
+
+
+def test_stage1_zero_lp_skips_for_empty_unreachable_and_one_way_core(
+    toy_model: Model, monkeypatch
+) -> None:
+    """Empty core, bound-unreachable core, and all-one-way core take 0 Stage-1 LPs."""
+    from spectra_cobra import extraction
+
+    # 1. Empty core + v=0 feasible -> 0 solver calls total
+    calls = []
+    monkeypatch.setattr(
+        Model, "slim_optimize", lambda self, *a, **k: calls.append(1)
+    )
+    empty_me = spectra_me(toy_model, [], problem_type=MIN_NET_LP, seed=0)
+    empty_ccme, blk_empty = spectra_ccme(toy_model, [], problem_type=MIN_NET_LP, seed=0)
+    assert len(empty_me.reactions) == 0
+    assert len(empty_ccme.reactions) == 0 and blk_empty == []
+    assert calls == []
+
+    # 2. Bound-unreachable core (bounds (-1e-6, 1e-6) vs tol=1e-3) -> 0 LPs!
+    toy_model.reactions.R3.bounds = (0.0, 1e-6)
+    with pytest.raises(SpectraInfeasibleCoreError):
+        spectra_me(toy_model, ["R3"], tol=1e-3, seed=0)
+    ccme_unreach, blk_unreach = spectra_ccme(
+        toy_model, ["R3"], tol=1e-3, seed=0
+    )
+    assert blk_unreach == ["R3"]
+    assert len(ccme_unreach.reactions) == 0
+    assert calls == []
+
+    # 3. All-one-way core -> 0 Stage-1 LPs in _discover_core_directions
+    toy_model.reactions.R3.bounds = (0.0, 10.0)
+    _, _, _, dir_lps = extraction._discover_core_directions(
+        model=toy_model,
+        core_ids={"R3"},
+        signs={r.id: 1.0 for r in toy_model.reactions},
+        all_weights={r.id: 1.0 for r in toy_model.reactions},
+        problem_type=MIN_NET_LP,
+        tol=1e-4,
+        steady_state=True,
+        inclusion_cutoff=None,
+        feasibility_tolerance=1e-9,
+        optimality_tolerance=1e-9,
+        lock_tol=0.99e-4,
+        rng=np.random.default_rng(0),
+    )
+    assert dir_lps == 0
+
+
+def test_negative_trade_off_weights_steer_two_way_core_via_w_anchor(
+    solver: str,
+) -> None:
+    """In tradeOff, negative penalties steer a two-way core reaction away from the penalised direction."""
+    from cobra import Metabolite, Reaction
+
+    # R_DRAIN (C -->) is a one-way core reaction forcing C consumption.
+    # R_CORE (A + C <=> B) is a two-way core reaction:
+    #   - Reverse (B --> A + C) produces C via IN_B and OUT_A (rewarded +1).
+    #   - Forward (A + C --> B) consumes C and requires IN_A, OUT_B, and ALT_SRC_C (penalised -10).
+    model = Model("two_way_tradeoff")
+    model.add_metabolites([Metabolite(m) for m in ("A", "B", "C")])
+    specs = [
+        ("R_DRAIN", {"C": -1.0}, 0.0, 10.0),
+        ("R_CORE", {"A": -1.0, "C": -1.0, "B": 1.0}, -10.0, 10.0),
+        ("IN_B", {"B": 1.0}, 0.0, 10.0),
+        ("OUT_A", {"A": -1.0}, 0.0, 10.0),
+        ("IN_A", {"A": 1.0}, 0.0, 10.0),
+        ("OUT_B", {"B": -1.0}, 0.0, 10.0),
+        ("ALT_SRC_C", {"C": 1.0}, 0.0, 10.0),
+    ]
+    model.add_reactions(
+        [Reaction(rid, lower_bound=lb, upper_bound=ub) for rid, _, lb, ub in specs]
+    )
+    for rid, stoich, _, _ in specs:
+        model.reactions.get_by_id(rid).add_metabolites(
+            {model.metabolites.get_by_id(m): c for m, c in stoich.items()}
+        )
+    model.solver = solver
+
+    weights = {
+        "R_DRAIN": 0.0,
+        "R_CORE": 0.0,
+        "IN_B": 1.0,
+        "OUT_A": 1.0,
+        "IN_A": -10.0,
+        "OUT_B": -10.0,
+        "ALT_SRC_C": -10.0,
+    }
+    ex_me = spectra_me(
+        model, ["R_DRAIN", "R_CORE"], weights=weights, problem_type=TRADE_OFF, seed=0
+    )
+    ex_ccme, blk = spectra_ccme(
+        model, ["R_DRAIN", "R_CORE"], weights=weights, problem_type=TRADE_OFF, seed=0
+    )
+    assert blk == []
+    assert _ids(ex_me) == {"R_DRAIN", "R_CORE", "IN_B", "OUT_A"}
+    assert _ids(ex_ccme) == {"R_DRAIN", "R_CORE", "IN_B", "OUT_A"}
+
+
+@pytest.mark.parametrize("prob_type", (MIN_NET_LP, MIN_NET_MILP, OPTIM_BIOMASS))
+def test_extraction_rejects_negative_weights_for_cost_formulations(
+    toy_model: Model, prob_type: str
+) -> None:
+    """spectra_me and spectra_ccme raise ValueError on negative weights unless tradeOff."""
+    with pytest.raises((SpectraValueError, ValueError), match="non-negative"):
+        spectra_me(toy_model, ["R3"], weights={"R2": -1.0}, problem_type=prob_type)
+    with pytest.raises((SpectraValueError, ValueError), match="non-negative"):
+        spectra_ccme(toy_model, ["R3"], weights={"R2": -1.0}, problem_type=prob_type)
+
+
+def test_reverse_only_reactions_preserve_original_bounds_and_stoichiometry(
+    backwards_model: Model,
+) -> None:
+    """Reverse-only reactions (ub <= 0) keep their original cobrapy sign and bounds."""
+    ex_me = spectra_me(backwards_model, ["R2"], seed=0)
+    ex_ccme, blk = spectra_ccme(backwards_model, ["R2", "R4"], seed=0)
+    assert blk == ["R4"]
+    for ex in (ex_me, ex_ccme):
+        assert _ids(ex) == {"R1", "R2", "R3"}
+        for rid in ("R1", "R2", "R3"):
+            orig = backwards_model.reactions.get_by_id(rid)
+            got = ex.reactions.get_by_id(rid)
+            assert got.bounds == orig.bounds == (-10.0, 0.0)
+            assert {m.id: c for m, c in got.metabolites.items()} == {
+                m.id: c for m, c in orig.metabolites.items()
+            }
+
+
+def test_spectra_me2_thermodynamic_cone_extraction_and_validation(
+    backwards_model: Model, reversible_model: Model
+) -> None:
+    """spectra_me2 extracts on the pure thermodynamic cone and preserves orientation."""
+    consistent_back = spectra_me(backwards_model, ["R2"], seed=0)
+    ex_thermo = spectra_me2(consistent_back, ["R2"], tol=1e-4, seed=0)
+    assert _ids(ex_thermo) == {"R1", "R2", "R3"}
+    for rid in ("R1", "R2", "R3"):
+        assert ex_thermo.reactions.get_by_id(rid).bounds == (-float("inf"), 0.0)
+
+    ex_rev = spectra_me2(reversible_model, ["R2"], tol=1e-4, n_solutions=2, seed=0)
+    assert len(ex_rev) == 2
+    assert ex_rev[0].reactions.R2.bounds == (-float("inf"), float("inf"))
+    assert ex_rev[0].reactions.R1.bounds == (0.0, float("inf"))
+
+    with pytest.raises((SpectraValueError, ValueError), match="non-negative"):
+        spectra_me2(reversible_model, ["R2"], weights={"R1": -1.0})
+
+
+def test_spectra_ccme_warns_on_mutual_finite_bound_core_conflict(
+    solver: str,
+) -> None:
+    """Mutually conflicting core reactions under finite bounds warn instead of appearing in blocked_core."""
+    from cobra import Metabolite, Reaction
+
+    # Shared source SRC (--> S, ub = 1.5e-4) feeds R_A (S -->) and R_B (S -->).
+    # At tol = 1e-4, R_A and R_B can each carry 1e-4 individually, but NOT 2e-4 together!
+    model = Model("mutual_conflict")
+    model.add_metabolites([Metabolite("S")])
+    for rid, stoich, ub in (
+        ("SRC", {"S": 1.0}, 1.5e-4),
+        ("R_A", {"S": -1.0}, 1.0),
+        ("R_B", {"S": -1.0}, 1.0),
+    ):
+        r = Reaction(rid, lower_bound=0.0, upper_bound=ub)
+        model.add_reactions([r])
+        r.add_metabolites({model.metabolites.S: stoich["S"]})
+    model.solver = solver
+
+    with pytest.warns(UserWarning, match="individually consistent"):
+        ex, blocked_core = spectra_ccme(model, ["R_A", "R_B"], tol=1e-4, seed=0)
+
+    assert blocked_core == [], "neither R_A nor R_B is individually blocked"
+    assert len(_ids(ex) & {"R_A", "R_B"}) == 1
+

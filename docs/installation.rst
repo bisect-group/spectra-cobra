@@ -35,7 +35,7 @@ Which solver you want depends on which formulations you plan to use.
    * - :func:`~spectra_cobra.spectra_cc`
      - LP
      - any, GLPK included
-   * - ``minNetLP``, ``growthOptim``
+   * - ``minNetLP``, ``optimBiomass``
      - LP
      - any, GLPK included
    * - ``minNetMILP``, ``tradeOff``
@@ -74,4 +74,4 @@ Gurobi or CPLEX widens the coverage automatically.
    >>> spectra_cobra.__version__
    '0.1.0.dev0'
    >>> spectra_cobra.PROBLEM_TYPES
-   ('minNetLP', 'minNetMILP', 'growthOptim', 'tradeOff')
+   ('minNetLP', 'minNetMILP', 'optimBiomass', 'tradeOff')

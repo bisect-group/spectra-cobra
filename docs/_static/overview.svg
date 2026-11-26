@@ -148,7 +148,7 @@
   <text class="fname" x="680" y="510">tradeOff</text>
   <text class="math"  x="680" y="527">max Σ wᵢzᵢ    wᵢ any real</text>
 
-  <text class="fname" x="680" y="556">growthOptim</text>
+  <text class="fname" x="680" y="556">optimBiomass</text>
   <text class="math"  x="680" y="573">max Σ𝒸 wᵢvᵢ − Σ wᵢtᵢ</text>
 
   <text class="t sub" x="823" y="590" text-anchor="middle">S·v = 0 (or ≥ 0),  v ∈ B  throughout</text>

@@ -15,7 +15,8 @@ The usual order of operations is:
    skip it and use :func:`spectra_ccme`, which folds the check into the
    extraction.
 2. :func:`spectra_me` to extract a context-specific model around a set of core
-   reactions, choosing a network inference formulation with `problem_type`.
+   reactions, choosing a network inference formulation with `problem_type`
+   (``"minNetLP"``, ``"minNetMILP"``, ``"tradeOff"``, or ``"optimBiomass"``).
 
 Reference
 ---------
@@ -44,23 +45,25 @@ from .exceptions import (
     SpectraError,
     SpectraInfeasibleCoreError,
     SpectraSolverError,
+    SpectraValueError,
 )
 from .extraction import (
     CORE_DIRECTION,
-    GROWTH_OPTIM,
     MIN_NET_LP,
     MIN_NET_MILP,
+    OPTIM_BIOMASS,
     PATHWAY_EXCLUSION,
     PROBLEM_TYPES,
     TRADE_OFF,
     spectra_ccme,
     spectra_me,
+    spectra_me2,
 )
 from .formulations import (
     MilpSolution,
-    growth_optim,
     min_net_lp,
     min_net_milp,
+    optim_biomass,
     trade_off,
 )
 from .gapfilling import (
@@ -101,11 +104,12 @@ __all__ = (
     # Extraction.
     "spectra_me",
     "spectra_ccme",
+    "spectra_me2",
     # Formulations, for use on their own.
     "min_net_lp",
     "min_net_milp",
     "trade_off",
-    "growth_optim",
+    "optim_biomass",
     "MilpSolution",
     # Verification.
     "check_extraction",
@@ -149,12 +153,13 @@ __all__ = (
     "MIN_NET_LP",
     "MIN_NET_MILP",
     "TRADE_OFF",
-    "GROWTH_OPTIM",
+    "OPTIM_BIOMASS",
     "PROBLEM_TYPES",
     "CORE_DIRECTION",
     "PATHWAY_EXCLUSION",
     # Exceptions.
     "SpectraError",
+    "SpectraValueError",
     "SpectraSolverError",
     "SpectraInfeasibleCoreError",
     "__version__",

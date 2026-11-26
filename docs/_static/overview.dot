@@ -62,7 +62,7 @@ digraph spectra {
           <td align="left"><font face="Courier" point-size="10" color="#8C4428">min Σ wᵢzᵢ &#160; zᵢ ∈ {0,1}</font></td></tr>
       <tr><td align="left"><font face="Courier" point-size="10" color="#8C4428"><b>tradeOff</b></font></td>
           <td align="left"><font face="Courier" point-size="10" color="#8C4428">max Σ wᵢzᵢ &#160; wᵢ any real</font></td></tr>
-      <tr><td align="left"><font face="Courier" point-size="10" color="#8C4428"><b>growthOptim</b></font></td>
+      <tr><td align="left"><font face="Courier" point-size="10" color="#8C4428"><b>optimBiomass</b></font></td>
           <td align="left"><font face="Courier" point-size="10" color="#8C4428">max Σ𝒸 wᵢvᵢ − Σ wᵢtᵢ</font></td></tr>
     </table>>];
 

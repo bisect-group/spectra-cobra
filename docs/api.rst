@@ -22,6 +22,8 @@ Extraction
    :no-index:
 .. autofunction:: spectra_cobra.spectra_ccme
    :no-index:
+.. autofunction:: spectra_cobra.spectra_me2
+   :no-index:
 
 Formulations
 ------------
@@ -32,7 +34,7 @@ Formulations
    :no-index:
 .. autofunction:: spectra_cobra.trade_off
    :no-index:
-.. autofunction:: spectra_cobra.growth_optim
+.. autofunction:: spectra_cobra.optim_biomass
    :no-index:
 
 Verification
@@ -47,6 +49,8 @@ Exceptions
 ----------
 
 .. autoexception:: spectra_cobra.SpectraError
+   :no-index:
+.. autoexception:: spectra_cobra.SpectraValueError
    :no-index:
 .. autoexception:: spectra_cobra.SpectraSolverError
    :no-index:

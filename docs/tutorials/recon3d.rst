@@ -51,10 +51,10 @@ iJO1366 does, and it comes with cobrapy, so this runs anywhere:
    from cobra.io import load_model
    from spectra_cobra import spectra_cc
 
-   model = load_model("iJO1366")
-   model.solver = "gurobi"
-   consistent = spectra_cc(model, tol=1e-4, detection_cutoff=1e-7, seed=0)
-   print(f"{len(model.reactions)} -> {len(consistent.reactions)} reactions")
+   ijo = load_model("iJO1366")
+   ijo.solver = "gurobi"
+   consistent = spectra_cc(ijo, tol=1e-4, detection_cutoff=1e-7, seed=0)
+   print(f"{len(ijo.reactions)} -> {len(consistent.reactions)} reactions")
 
 .. code-block:: text
 
@@ -155,15 +155,15 @@ that costs nothing, since the model is already consistent.
 
 .. code-block:: text
 
-   core  10 trial 0:  136 reactions, core kept 10/10, blocked 0
-   core  10 trial 1:  221 reactions, core kept 10/10, blocked 0
-   core  10 trial 2:  109 reactions, core kept 10/10, blocked 0
-   core  50 trial 0:  460 reactions, core kept 50/50, blocked 0
-   core  50 trial 1:  508 reactions, core kept 50/50, blocked 0
-   core  50 trial 2:  444 reactions, core kept 50/50, blocked 0
-   core 200 trial 0: 1286 reactions, core kept 200/200, blocked 0
-   core 200 trial 1: 1246 reactions, core kept 200/200, blocked 0
-   core 200 trial 2: 1298 reactions, core kept 200/200, blocked 0
+   core  10 trial 0:  120 reactions, core kept 10/10, blocked 0
+   core  10 trial 1:  201 reactions, core kept 10/10, blocked 0
+   core  10 trial 2:   90 reactions, core kept 10/10, blocked 0
+   core  50 trial 0:  406 reactions, core kept 50/50, blocked 0
+   core  50 trial 1:  447 reactions, core kept 50/50, blocked 0
+   core  50 trial 2:  431 reactions, core kept 50/50, blocked 0
+   core 200 trial 0: 1180 reactions, core kept 200/200, blocked 0
+   core 200 trial 1: 1184 reactions, core kept 200/200, blocked 0
+   core 200 trial 2: 1202 reactions, core kept 200/200, blocked 0
 
 .. list-table::
    :header-rows: 1
@@ -176,24 +176,24 @@ that costs nothing, since the model is already consistent.
      - blocked
    * - 10
      - 3
-     - 109–221
+     - 90–201
      - all
      - 0
    * - 50
      - 3
-     - 444–508
+     - 406–447
      - all
      - 0
    * - 200
      - 3
-     - 1286–1298
+     - 1180–1202
      - all
      - 0
 
-Both promises hold in every trial, and each one takes five to seven seconds
-including the verification. The spread within a core size is wide — 109
-against 221 reactions for ten core reactions — because what a core set costs
-depends on where in the network it falls, not on how large it is.
+Both promises hold in every trial, and each one takes seconds including the
+verification. The spread within a core size is wide — 90 against 201 reactions
+for ten core reactions — because what a core set costs depends on where in the
+network it falls, not on how large it is.
 
 .. note::
 
@@ -223,10 +223,10 @@ this now takes care of itself. Loosening it is a deliberate act:
 .. code-block:: python
 
    # The default. Nothing to pass.
-   extracted = spectra_me(consistent, core, tol=1e-4)
+   extracted = spectra_me(consistent_recon3d, core, tol=1e-4)
 
    # Back to the solver's own, and to the failures below.
-   extracted = spectra_me(consistent, core, tol=1e-4,
+   extracted = spectra_me(consistent_recon3d, core, tol=1e-4,
                           feasibility_tolerance=None)
 
 **2. Do not floor the inclusion cutoff.** A reaction joins the extracted
@@ -323,21 +323,24 @@ taking on a small model or if you have raised ``inclusion_cutoff`` yourself.
    your model: call it from inside an ``if __name__ == "__main__":`` guard,
    or pass ``processes=1``.
 
-Occasional direction failures
------------------------------
+Occasional direction stalls
+---------------------------
 
-One of the twelve trials raised:
+On rare coupled core pairs (two reactions sharing an isolated metabolite that
+must run in opposite senses), an unlucky random draw in the pinned direction
+loop can stall:
 
 .. code-block:: text
 
-   SpectraError: 2 core reaction(s) could not be given a flux direction ...
-   Their accumulated flux stays below 1e-05, which can happen when the convex
-   combination of two iterations cancels out; retry with a different seed.
+   SpectraError: 2 core reaction(s) could not be given a flux direction in 5
+   attempts ... Reactions that can only carry flux together, in opposite
+   directions, are the usual cause.
 
-The direction phase blends successive flux vectors as a convex combination, so
-two iterations can cancel on a given reaction and leave it at zero. It is a
-property of the algorithm, not of your core set, and a different ``seed``
-fixes it. Worth wrapping if you are running many core sets unattended:
+Stage 1 shares one random weight draw per round across ``forward`` and
+``reverse`` without convex combinations and redraws up to five rounds before
+raising. In the rare event a seed still stalls, retrying with a different
+``seed`` settles it. Worth wrapping if you are running many core sets
+unattended:
 
 .. code-block:: python
 
@@ -478,7 +481,7 @@ entry point, so you can set them per call:
 
 .. code-block:: python
 
-   extracted = spectra_me(consistent, core, tol=1e-4,
+   extracted = spectra_me(consistent_recon3d, core, tol=1e-4,
                           problem_type="minNetMILP", time_limit=3600,
                           feasibility_tolerance=1e-9,
                           optimality_tolerance=1e-9,
@@ -487,7 +490,7 @@ entry point, so you can set them per call:
 :func:`~spectra_cobra.spectra_cc` takes the first two. It solves only LPs, so
 there is no integrality tolerance to set, and asking for one is an error
 rather than a setting that does nothing. The same holds for ``minNetLP`` and
-``growthOptim`` within :func:`~spectra_cobra.spectra_me`: the argument is
+``optimBiomass`` within :func:`~spectra_cobra.spectra_me`: the argument is
 accepted there because one ``problem_type`` away it matters, but it reaches
 only the formulations that have binaries.
 

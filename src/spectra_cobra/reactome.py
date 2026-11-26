@@ -89,7 +89,7 @@ from optlang.interface import OPTIMAL
 from optlang.symbolics import Zero
 
 from ._copy import subset_model
-from .exceptions import SpectraError, SpectraInfeasibleCoreError
+from .exceptions import SpectraError, SpectraInfeasibleCoreError, SpectraValueError
 from .formulations import INCLUSION_CUTOFF_FACTOR
 from .gapfilling import _as_bounds
 
@@ -867,7 +867,7 @@ def _costs(
     costs = {rxn_id: float((weights or {}).get(rxn_id, 1.0)) for rxn_id in counted}
     negative = sorted(rxn_id for rxn_id, cost in costs.items() if cost < 0.0)
     if negative:
-        raise SpectraError(
+        raise SpectraValueError(
             f"weights must be non-negative, since they are what keeping a "
             f"reaction costs, but {len(negative)} are not, for example "
             f"{negative[:5]}. A negative cost would pay the solver to keep "

@@ -222,7 +222,7 @@ TRADE_OFF_WEIGHTS: Dict[str, float] = dict(
 #: A weight of one everywhere, as the ``minNet`` runs use.
 UNIT_WEIGHTS: Dict[str, float] = {f"r{index}": 1.0 for index in range(1, 12)}
 
-#: ``growthOptim``'s weights: one everywhere, ten on the objective reaction.
+#: ``optimBiomass``'s weights: one everywhere, ten on the objective reaction.
 GROWTH_WEIGHTS: Dict[str, float] = dict(UNIT_WEIGHTS, r5=10.0)
 
 ALL_SIX = {"r1", "r2", "r3", "r4", "r5", "r6"}
@@ -412,8 +412,8 @@ def test_me_trade_off_follows_the_published_weights(solver: str) -> None:
     assert _ids(extracted) == {"r5", "r6", "r7", "r8"}
 
 
-def test_me_growth_optim_uses_every_route(solver: str) -> None:
-    """growthOptim keeps all three routes to maximise the objective flux.
+def test_me_optim_biomass_uses_every_route(solver: str) -> None:
+    """optimBiomass keeps all three routes to maximise the objective flux.
 
     The reward is ten per unit of ``r5`` against one per unit of flux
     elsewhere. Running every route gives ``d = 2`` for a flux cost of ten, so
@@ -424,7 +424,7 @@ def test_me_growth_optim_uses_every_route(solver: str) -> None:
         ["r5"],
         tol=ME_TOL,
         weights=GROWTH_WEIGHTS,
-        problem_type="growthOptim",
+        problem_type="optimBiomass",
         seed=0,
     )
     assert _ids(extracted) == set(UNIT_WEIGHTS)

@@ -35,12 +35,18 @@ possible towards the flux threshold at once, until that set stops shrinking:
 
 :math:`J` is the set of reactions not yet shown to carry flux,
 :math:`J^{rev}` the reversible ones among them, and :math:`w_i` are drawn
-uniformly from [1, 1.1] to break ties.
+uniformly from [1, 1.1] once per iteration and **shared** across both LPs.
+Sharing the per-iteration weight vector guarantees that reversible terms cancel
+identically when summing the directional derivatives along any feasible ray,
+preventing coupled anti-parallel reversible rays driven by irreversible
+reactions from stalling and ensuring almost-sure completeness in a single pass.
 
-No reaction flipping is needed. The forward LP's auxiliary variable
+Reverse-only irreversible reactions (``upper_bound <= 0``) are oriented
+internally via sign coefficients without mutating the input model, and no
+per-reaction sign-flipping loop is needed: the forward LP's auxiliary variable
 :math:`z_i` is unbounded from below, so a reaction that can only carry
-negative flux simply fails to contribute to that LP and is picked up by the
-reverse LP instead.
+negative oriented flux simply fails to contribute to that LP and is picked up
+by the reverse LP instead.
 
 Reference
 ---------

@@ -5,20 +5,19 @@ so the model fails to grow on a substrate the organism grows on, or cannot
 perform a reaction sequence it certainly performs. Gap-filling borrows the
 smallest useful set of reactions from a universal model to close that gap.
 
-Two requirements are supported, and they differ in how the requirement is
-expressed rather than in what they do afterwards.
+Two requirements are supported:
 
-:func:`gapfill_for_growth` requires the model to grow, in each of a panel of
-media. Growth is demanded through a *lower bound* on the biomass reaction,
-not through `tol`. The distinction matters: `tol` is the flux every core
-reaction must carry, so raising it to a growth rate would also demand that
-rate of any other core reaction the caller supplies.
-
-:func:`gapfill_for_tasks` requires the model to perform a list of
-:mod:`~spectra_cobra.tasks`, by way of the reactions those tasks cannot do
-without.
+* :func:`gapfill_for_growth` requires the model to grow in each of a panel of
+  media via a lower bound on the biomass reaction.
+* :func:`gapfill_for_tasks` requires the model to perform a list of
+  :mod:`~spectra_cobra.tasks`, using :func:`~spectra_cobra.spectra_ccme` in
+  Step 1 across any of the four ``problem_type`` formulations
+  (``"minNetMILP"``, ``"minNetLP"``, ``"tradeOff"``, or ``"optimBiomass"``)
+  followed by a task-by-task ``"minNetMILP"`` repair pass in Step 2.
 """
 
+import math
+import warnings
 from dataclasses import dataclass
 from logging import getLogger
 from typing import (
@@ -34,12 +33,30 @@ from typing import (
     Union,
 )
 
+import numpy as np
+from cobra.util.solver import linear_reaction_coefficients
+
 from ._copy import subset_model
-from .exceptions import SpectraError, SpectraSolverError
-from .extraction import MIN_NET_LP, MIN_NET_MILP, spectra_me
+from ._orientation import STOICHIOMETRY
+from .exceptions import SpectraError, SpectraSolverError, SpectraValueError
+from .extraction import (
+    MIN_NET_LP,
+    MIN_NET_MILP,
+    OPTIM_BIOMASS,
+    PROBLEM_TYPES,
+    TRADE_OFF,
+    _validate_problem_type,
+    spectra_ccme,
+    spectra_me,
+)
+from .formulations import (
+    DEFAULT_SOLVER_TOLERANCE,
+    _validate_positive_finite,
+    min_net_milp,
+)
 
 if TYPE_CHECKING:
-    from cobra.core import Model
+    from cobra.core import Model, Reaction
 
     from .community import CommunityModel
     from .tasks import MetabolicTask
@@ -48,25 +65,16 @@ if TYPE_CHECKING:
 logger = getLogger(__name__)
 
 #: The growth rate a gap-filled model is asked for when the caller does not
-#: say. A real rate rather than a numerical floor: the point of the exercise
-#: is a model that grows, and a model scraping along at 1e-6 does not.
-#: Replace it with a measured rate where you have one.
+#: say.
 DEFAULT_MIN_GROWTH = 0.1
 
-#: Formulations that can be used to gap-fill towards growth. ``tradeOff``
-#: is absent on purpose: it requires every included reaction to carry at
-#: least `tol`, and growth needs trace fluxes far below that, so it comes
-#: back infeasible at every tolerance.
+#: Formulations that can be used to gap-fill towards growth.
 GROWTH_PROBLEM_TYPES = (MIN_NET_MILP, MIN_NET_LP)
 
-#: What a medium says about one exchange reaction: a lower bound on its
-#: own, or a ``(lower, upper)`` pair. Uptake is negative flux, so a bare
-#: ``-10`` permits taking up to 10 and a pair ``(-10, -5)`` *requires*
-#: between 5 and 10 to be taken up.
+#: What a medium says about one exchange reaction.
 Bound = Union[float, Tuple[float, float]]
 
-#: A medium, keyed by exchange reaction. Uptake of anything not named is
-#: closed; its secretion is left as the model has it.
+#: A medium, keyed by exchange reaction.
 Medium = Mapping[str, Bound]
 
 
@@ -86,6 +94,8 @@ class GapfillResult:
         The requirements it still does not meet.
     failed : dict of {str: str}
         Requirements whose solve did not finish, and why.
+    skipped : tuple of str
+        Tasks the universal model itself cannot perform, and so were skipped.
 
     """
 
@@ -94,6 +104,7 @@ class GapfillResult:
     satisfied: Tuple[str, ...] = ()
     unsatisfied: Tuple[str, ...] = ()
     failed: Dict[str, str] = None  # type: ignore[assignment]
+    skipped: Tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """Default the failure map without making the class mutable."""
@@ -101,14 +112,7 @@ class GapfillResult:
             object.__setattr__(self, "failed", {})
 
     def summary(self) -> str:
-        """Return a one-line account of the result.
-
-        Returns
-        -------
-        str
-            The sizes and outcomes.
-
-        """
+        """Return a one-line account of the result."""
         return (
             f"{len(self.model.reactions)} reactions "
             f"({len(self.added)} added); "
@@ -121,27 +125,7 @@ class GapfillResult:
 def _as_labelled(
     media: Union[Medium, Sequence[Medium], Mapping[str, Medium]],
 ) -> List[Tuple[str, Medium]]:
-    """Return the media as (label, medium) pairs.
-
-    Parameters
-    ----------
-    media : dict, sequence of dict, or dict of {str: dict}
-        One medium, several unlabelled, or several labelled.
-
-    Returns
-    -------
-    list of (str, dict)
-        The labelled media.
-
-    Notes
-    -----
-    A single medium and a labelled panel are both mappings, so they are
-    told apart by what the values are: a panel maps a label to a medium,
-    which is itself a mapping. Deciding on the outer type alone would read
-    ``{"EX_glc_e": -10.0}`` as one medium named ``EX_glc_e`` whose content
-    is a float.
-
-    """
+    """Return the media as (label, medium) pairs."""
     if isinstance(media, Mapping):
         if media and all(isinstance(v, Mapping) for v in media.values()):
             return list(media.items())
@@ -152,38 +136,19 @@ def _as_labelled(
 def _as_bounds(
     rxn_id: str, bound: "Bound"
 ) -> Tuple[float, Optional[float]]:
-    """Return one medium entry as a lower bound and an optional upper.
-
-    Parameters
-    ----------
-    rxn_id : str
-        The exchange the entry is for, for the error message.
-    bound : float, or tuple of (float, float)
-        The entry.
-
-    Returns
-    -------
-    tuple of (float, float or None)
-        The lower bound, and the upper bound if one was given.
-
-    Raises
-    ------
-    SpectraError
-        If a pair is the wrong way round, or is not a pair of numbers.
-
-    """
+    """Return one medium entry as a lower bound and an optional upper."""
     if isinstance(bound, (int, float)) and not isinstance(bound, bool):
         return float(bound), None
     try:
         lower, upper = bound
         lower, upper = float(lower), float(upper)
     except (TypeError, ValueError) as error:
-        raise SpectraError(
+        raise SpectraValueError(
             f"The medium entry for {rxn_id!r} is {bound!r}, which is neither "
             f"a lower bound nor a (lower, upper) pair."
         ) from error
     if lower > upper:
-        raise SpectraError(
+        raise SpectraValueError(
             f"The medium gives {rxn_id!r} bounds ({lower:g}, {upper:g}), "
             f"which are the wrong way round. Uptake is negative flux, so an "
             f"uptake of at most 10 is a lower bound of -10, and requiring "
@@ -193,32 +158,13 @@ def _as_bounds(
 
 
 def _apply_medium(model: "Model", medium: Medium) -> None:
-    """Close every exchange, then open the ones the medium names.
-
-    Parameters
-    ----------
-    model : cobra.Model
-        The model to constrain, inside a ``with`` block.
-    medium : dict of {str: float or (float, float)}
-        What to allow each exchange reaction. A float is a lower bound; a
-        pair is ``(lower, upper)`` and pins both ends, which is the only
-        way to *require* an uptake rather than permit it.
-
-    Raises
-    ------
-    SpectraError
-        If the medium names a reaction the model does not have, or gives
-        bounds the wrong way round.
-
-    """
+    """Close every exchange, then open the ones the medium names."""
     unknown = [r for r in medium if r not in model.reactions]
     if unknown:
-        raise SpectraError(
+        raise SpectraValueError(
             f"The medium names {len(unknown)} reaction(s) the model does not "
             f"have, for example {sorted(unknown)[:5]}."
         )
-    # Only uptake is closed. Secretion is left as the model has it, so a
-    # medium says what is available, not what may leave.
     for reaction in model.boundary:
         reaction.lower_bound = 0.0
     for rxn_id, bound in medium.items():
@@ -231,29 +177,10 @@ def _apply_medium(model: "Model", medium: Medium) -> None:
 
 
 def _objective_reaction(model: "Model", given: Optional[str]) -> str:
-    """Return the reaction whose flux counts as growth.
-
-    Parameters
-    ----------
-    model : cobra.Model
-        The model to inspect.
-    given : str, optional
-        The caller's choice, if any.
-
-    Returns
-    -------
-    str
-        The reaction identifier.
-
-    Raises
-    ------
-    SpectraError
-        If it is absent, or cannot be identified.
-
-    """
+    """Return the reaction whose flux counts as growth."""
     if given is not None:
         if given not in model.reactions:
-            raise SpectraError(f"No reaction {given!r} in the model.")
+            raise SpectraValueError(f"No reaction {given!r} in the model.")
         return given
     objective = [r.id for r in model.reactions if r.objective_coefficient != 0]
     if len(objective) == 1:
@@ -265,25 +192,7 @@ def _objective_reaction(model: "Model", given: Optional[str]) -> str:
 
 
 def _grows(model: "Model", medium: Medium, threshold: float) -> bool:
-    """Return whether the model reaches the growth threshold in a medium.
-
-    Parameters
-    ----------
-    model : cobra.Model
-        The model to test.
-    medium : dict of {str: float or (float, float)}
-        The medium to apply.
-    threshold : float
-        The growth rate to reach.
-
-    Returns
-    -------
-    bool
-        Whether it grows that fast.
-
-    """
-    import numpy as np
-
+    """Return whether the model reaches the growth threshold in a medium."""
     with model:
         _apply_medium(model, medium)
         value = model.slim_optimize()
@@ -291,24 +200,42 @@ def _grows(model: "Model", medium: Medium, threshold: float) -> bool:
 
 
 def _rebuild(universal: "Model", keep: Set[str]) -> "Model":
-    """Return the universal model cut down to the given reactions.
-
-    Parameters
-    ----------
-    universal : cobra.Model
-        The model to cut down.
-    keep : set of str
-        The reactions to retain.
-
-    Returns
-    -------
-    cobra.Model
-        The reduced model.
-
-    """
-    # Orphaned metabolites stay: the draft may still need them, and they
-    # cost nothing.
+    """Return the universal model cut down to the given reactions."""
     return subset_model(universal, set(keep), keep_orphan_metabolites=True)
+
+
+def _validate_user_weights(
+    weights: Optional[Mapping[str, float]],
+    univ_rxn_ids: Set[str],
+    problem_type: str,
+) -> None:
+    """Validate user weight overrides against the universal model and `problem_type`."""
+    if weights is None:
+        return
+    if not isinstance(weights, Mapping):
+        raise SpectraValueError("weights must be a mapping from reaction ID to weight.")
+
+    allow_negative = problem_type == TRADE_OFF
+    for rxn_id, raw_val in weights.items():
+        if not isinstance(rxn_id, str) or rxn_id not in univ_rxn_ids:
+            raise SpectraValueError(
+                f"No reaction {rxn_id!r} in the universal model, so it cannot be weighted."
+            )
+        if isinstance(raw_val, bool) or not isinstance(raw_val, (int, float, np.number)):
+            raise SpectraValueError(
+                f"Weight for reaction {rxn_id!r} must be a finite numeric scalar."
+            )
+        val = float(raw_val)
+        if not math.isfinite(val):
+            raise SpectraValueError(
+                f"Weight for reaction {rxn_id!r} must be a finite numeric scalar."
+            )
+        if not allow_negative and val < 0.0:
+            raise SpectraValueError(
+                f"Reaction weights must be non-negative for problem_type "
+                f"{problem_type!r} (got {val:g} on {rxn_id!r}); use "
+                f"'tradeOff' for signed weights."
+            )
 
 
 def _inclusion_weights(
@@ -316,34 +243,7 @@ def _inclusion_weights(
     free: Set[str],
     given: Optional[Mapping[str, float]],
 ) -> Dict[str, float]:
-    """What it costs the gap-fill to include each reaction.
-
-    Parameters
-    ----------
-    reactions : iterable of cobra.Reaction
-        The reactions to price, i.e. everything the solve may draw on.
-    free : set of str
-        Reactions that cost nothing: the draft's own, the boundary, and
-        anything the caller declared free.
-    given : mapping of {str: float}, optional
-        The caller's own evidence, keyed by reaction identifier. Expression
-        evidence or a sequence-similarity score belongs here, scaled so that
-        a *lower* number means better supported and so cheaper to add.
-
-    Returns
-    -------
-    dict of {str: float}
-        The weight of every reaction given.
-
-    Notes
-    -----
-    Anything already free stays free whatever `given` says, since including
-    a reaction the draft already has costs nothing by definition. Reactions
-    `given` does not mention keep the default weight of 1, so supplying
-    evidence for part of a universal model neither makes the rest free nor
-    puts it out of reach.
-
-    """
+    """What it costs `gapfill_for_growth` to include each reaction."""
     given = given or {}
     return {
         reaction.id: (
@@ -351,6 +251,106 @@ def _inclusion_weights(
         )
         for reaction in reactions
     }
+
+
+def _build_task_core_weights(
+    universal: "Model",
+    free_ids: Set[str],
+    weights: Optional[Mapping[str, float]],
+    problem_type: str,
+) -> Dict[str, float]:
+    """Build formulation-aware Step-1 weights for `gapfill_for_tasks`."""
+    rxn_ids = [rxn.id for rxn in universal.reactions]
+    if problem_type == TRADE_OFF:
+        # Candidate additions default to -1 penalty; draft/free default to 0.
+        core_weights = {
+            rid: (0.0 if rid in free_ids else -1.0) for rid in rxn_ids
+        }
+    elif problem_type == OPTIM_BIOMASS:
+        # Keep positive default reward (1.0) on objective reactions even when in draft/free.
+        obj_ids = {
+            rxn.id
+            for rxn, coef in linear_reaction_coefficients(universal).items()
+            if coef
+        }
+        if not obj_ids:
+            msg = (
+                "universal.objective has no non-zero objective entries; "
+                "'optimBiomass' reduces to L1 flux minimization."
+            )
+            warnings.warn(msg, UserWarning, stacklevel=3)
+            logger.warning(msg)
+        core_weights = {
+            rid: (0.0 if (rid in free_ids and rid not in obj_ids) else 1.0)
+            for rid in rxn_ids
+        }
+    else:
+        core_weights = {
+            rid: (0.0 if rid in free_ids else 1.0) for rid in rxn_ids
+        }
+
+    for rxn_id, val in (weights or {}).items():
+        if rxn_id in core_weights:
+            core_weights[rxn_id] = float(val)
+    return core_weights
+
+
+def _build_task_repair_costs(
+    constrained: "Model",
+    universal: "Model",
+    already_there: Set[str],
+    is_free_now: Set[str],
+    weights: Optional[Mapping[str, float]],
+    problem_type: str,
+) -> Dict[str, float]:
+    """Build non-negative Step-2 `minNetMILP` repair costs for `gapfill_for_tasks`."""
+    rxn_ids = [rxn.id for rxn in constrained.reactions]
+    given = weights or {}
+
+    if problem_type == TRADE_OFF:
+        signed_w = {
+            rid: (0.0 if rid in is_free_now else -1.0) for rid in rxn_ids
+        }
+        for rid, val in given.items():
+            if rid in signed_w:
+                signed_w[rid] = float(val)
+
+        neg_magnitudes = [-w for w in signed_w.values() if w < 0.0]
+        min_neg = min([1.0] + neg_magnitudes) if neg_magnitudes else 1.0
+        eps_base = 1e-4 * min_neg
+
+        repair_cost: Dict[str, float] = {}
+        for rid in rxn_ids:
+            w = signed_w[rid]
+            if w < 0.0:
+                repair_cost[rid] = -w
+            elif rid in already_there:
+                repair_cost[rid] = 0.0
+            else:
+                repair_cost[rid] = eps_base / (1.0 + w)
+        return repair_cost
+
+    if problem_type == OPTIM_BIOMASS:
+        obj_ids = {
+            rxn.id
+            for rxn, coef in linear_reaction_coefficients(universal).items()
+            if coef
+        }
+        repair_cost = {
+            rid: (0.0 if rid in is_free_now else 1.0) for rid in rxn_ids
+        }
+        for rid, val in given.items():
+            if rid not in obj_ids and rid in repair_cost:
+                repair_cost[rid] = float(val)
+        return repair_cost
+
+    repair_cost = {
+        rid: (0.0 if rid in is_free_now else 1.0) for rid in rxn_ids
+    }
+    for rid, val in given.items():
+        if rid in repair_cost:
+            repair_cost[rid] = float(val)
+    return repair_cost
 
 
 def gapfill_for_growth(
@@ -373,48 +373,24 @@ def gapfill_for_growth(
     draft : cobra.Model
         The reconstruction with gaps. Its reactions cost nothing to keep.
     universal : cobra.Model
-        The model to borrow reactions from. The draft should be a subset of
-        it, in the sense that the identifiers line up.
+        The model to borrow reactions from.
     media : dict, sequence of dict, or dict of {str: dict}
-        The media to grow in. One medium maps each exchange reaction to
-        either a lower bound or a ``(lower, upper)`` pair. Uptake is
-        negative flux, so a bare ``-10`` *permits* taking up to 10 and
-        leaves the model free to take nothing, while a pair pins both ends
-        and only a negative upper bound can *require* an uptake:
-        ``(-10, -5)`` demands between 5 and 10.
-
-        A medium governs uptake only. Exchanges it does not name have
-        their lower bound closed; no exchange has its upper bound touched
-        unless you give it a pair, so secretion stays as the model has it.
-
-        Pass one medium, a sequence of them, or a mapping to label them.
+        The media to grow in.
     min_growth : float, optional
         The growth rate to demand, applied as a lower bound on the
-        objective reaction (default 0.1). Pass None to leave the bound
-        alone and require only that growth is possible at all.
+        objective reaction (default 0.1). Pass None to require only positive
+        growth.
     objective_reaction : str, optional
         The reaction whose flux is growth (default: the model's objective,
         if there is exactly one).
     tol : float, optional
-        The minimum flux a core reaction must carry (default 1e-4). This is
-        the usual extraction threshold and is deliberately *not* how the
-        growth rate is set; see the notes.
+        The minimum flux a core reaction must carry (default 1e-4).
     problem_type : {"minNetMILP", "minNetLP"}, optional
         The formulation (default "minNetMILP").
     free_reactions : iterable of str, optional
-        Reactions beyond the draft that cost nothing to include, typically
-        those known to be essential for growth in some medium.
+        Reactions beyond the draft that cost nothing to include.
     weights : mapping of {str: float}, optional
-        What it costs to add each reaction, keyed by identifier. This is
-        where evidence goes: expression levels, a sequence-similarity score
-        from the annotation, a curator's confidence. Scale it so a *lower*
-        weight means better supported, since the gap-fill minimises the
-        weighted total and so prefers the cheapest reactions.
-
-        Reactions left out keep the default weight of 1, and the draft's own
-        reactions, the boundary reactions, stay free whatever is passed here, so partial
-        evidence is fine. Pass nothing and every candidate costs the same,
-        which minimises the *number* of reactions added.
+        Non-negative cost weights for candidate reactions.
     time_limit : float, optional
         Seconds per solve (default 300).
     seed : int, optional
@@ -425,34 +401,18 @@ def gapfill_for_growth(
     GapfillResult
         The gap-filled model, what it added, and which media it grows in.
 
-    Raises
-    ------
-    SpectraError
-        If `problem_type` cannot be used for growth, or the objective is
-        ambiguous.
-
-    Notes
-    -----
-    The growth requirement is a bound on the biomass reaction, not a large
-    `tol`. They are easy to confuse, because making biomass the core
-    reaction and setting ``tol`` to a growth rate does appear to work. It
-    also silently demands that same rate of every *other* core reaction,
-    which breaks as soon as the caller supplies one. Keeping the two apart
-    additionally makes the result insensitive to ``tol``: on iJO1366 the
-    same 15 reactions come back at every tolerance from 1e-4 to 1e-7.
-
-    ``tradeOff`` is not offered. It requires every included reaction to
-    carry at least ``tol``, while a growth solution needs trace fluxes well
-    below that, so it is infeasible at every tolerance.
-
     """
+    tol_val = _validate_positive_finite(tol, "tol")
     if problem_type not in GROWTH_PROBLEM_TYPES:
-        raise SpectraError(
+        raise SpectraValueError(
             f"problem_type must be one of {GROWTH_PROBLEM_TYPES} to gap-fill "
             f"towards growth, not {problem_type!r}. tradeOff requires every "
             f"included reaction to carry at least tol, which growth cannot "
             f"satisfy."
         )
+
+    univ_rxn_ids = {rxn.id for rxn in universal.reactions}
+    _validate_user_weights(weights, univ_rxn_ids, problem_type)
 
     biomass = _objective_reaction(universal, objective_reaction)
     labelled = _as_labelled(media)
@@ -475,7 +435,7 @@ def gapfill_for_growth(
                 filled = spectra_me(
                     universal,
                     [biomass],
-                    tol=tol,
+                    tol=tol_val,
                     weights=costs,
                     problem_type=problem_type,
                     time_limit=time_limit,
@@ -503,19 +463,7 @@ def gapfill_for_growth(
 
 
 def _floor(min_growth: Optional[float]) -> float:
-    """Return the growth rate that counts as growing.
-
-    Parameters
-    ----------
-    min_growth : float, optional
-        The demanded rate, or None.
-
-    Returns
-    -------
-    float
-        The rate to test against.
-
-    """
+    """Return the growth rate that counts as growing."""
     return 1e-6 if min_growth is None else float(min_growth)
 
 
@@ -543,45 +491,32 @@ def gapfill_for_tasks(
         The model to borrow reactions from.
     tasks : sequence of MetabolicTask
         What the result has to be able to do. Tasks the universal model
-        cannot perform itself are skipped, since nothing could be added to
-        make them work.
+        cannot perform itself are skipped and recorded in ``result.skipped``.
     tol : float, optional
         The minimum flux a core reaction must carry (default 1e-4).
-    problem_type : str, optional
-        The formulation the core solve uses (default "minNetMILP"). It does
-        not reach the repair step, which is always mixed-integer: repairing
-        one failing task is a small problem, so the exact answer is cheap.
+    problem_type : {"minNetMILP", "minNetLP", "tradeOff", "optimBiomass"}, optional
+        The formulation the Step-1 core solve uses (default "minNetMILP").
+        Step 2 task-by-task repair always uses ``"minNetMILP"``.
     free_reactions : iterable of str, optional
         Reactions beyond the draft that cost nothing to include.
     weights : mapping of {str: float}, optional
-        What it costs to add each reaction, keyed by identifier. This is
-        where evidence goes: expression levels, a sequence-similarity score
-        from the annotation, a curator's confidence. Scale it so a *lower*
-        weight means better supported, since the gap-fill minimises the
-        weighted total and so prefers the cheapest reactions.
-
-        Reactions left out keep the default weight of 1, and the draft's own
-        reactions stay free whatever is passed here, so partial
-        evidence is fine. Pass nothing and every candidate costs the same,
-        which minimises the *number* of reactions added.
+        Reaction weight overrides keyed by identifier. For ``"minNetMILP"``,
+        ``"minNetLP"``, and ``"optimBiomass"``, weights must be non-negative
+        (draft/free default to 0, except objective reactions in
+        ``"optimBiomass"`` which default to 1; candidate additions default to
+        1). For ``"tradeOff"``, any finite signed real weights are accepted
+        (draft/free default to 0, candidate additions to -1) and converted
+        monotonically into non-negative repair penalties in Step 2.
     essential_reactions : iterable of str, optional
-        The reactions essential to the tasks, if you have already computed
-        them. Finding them is the expensive part -- 394 s on Human-GEM --
-        and it depends only on the universal model and the task list, so it
-        is worth doing once and reusing.
+        Pre-computed essential task reactions to use as the Step-1 core set.
     core_solve : bool, optional
-        Whether to run the bulk solve that forces the essential reactions
-        in (default True). Set it False when the model handed in has
-        already been extracted with those reactions as its core, which is
-        the usual pipeline: the extraction is yours and carries your
-        evidence weights, and this is only here to repair what the core
-        could not express.
+        Whether to run the Step-1 core extraction via :func:`spectra_ccme`
+        (default True).
     repair : bool, optional
-        Whether to follow up task by task on whatever still fails (default
-        True). This is usually necessary, see the notes. The repair solve is
-        always "minNetMILP", whatever `problem_type` was given.
+        Whether to follow up task by task with ``"minNetMILP"`` on any task
+        still failing after Step 1 (default True).
     time_limit : float, optional
-        Seconds per solve (default 300).
+        Seconds per MILP solve (default 300).
     seed : int, optional
         A seed for the extraction's randomised coefficients.
 
@@ -590,41 +525,22 @@ def gapfill_for_tasks(
     GapfillResult
         The gap-filled model, what it added, and which tasks it performs.
 
-    Notes
-    -----
-    There are two phases, and they can be used separately.
-
-    The first turns the tasks into a core reaction set, by way of the
-    reactions each task becomes infeasible without, and extracts around it.
-    That is a necessary condition and not a sufficient one: a task with two
-    alternative routes has no essential reactions at all, so forcing the
-    set cannot guarantee it survives. On Human-GEM 34 of 45 tasks have none,
-    and the core constraint says nothing whatever about them.
-
-    The second repairs what is left, gap-filling each still-failing task
-    inside its own constraints. On iJO1366 that was the difference between
-    one failing task and none.
-
-    If you are extracting a context-specific model yourself -- with the
-    essential reactions as the core and your own evidence as the weights --
-    then the first phase has already happened, and repeating it here would
-    both recompute the essential reactions and overrule your weights. Pass
-    ``core_solve=False`` and the already-computed ``essential_reactions``:
-
-    .. code-block:: python
-
-       core, _ = essential_reactions_for_tasks(universal, tasks)
-       extracted = spectra_me(universal, sorted(core), weights=evidence)
-       result = gapfill_for_tasks(
-           extracted, universal, tasks,
-           essential_reactions=core, core_solve=False,
-       )
+    Raises
+    ------
+    SpectraValueError
+        If `tol`, `problem_type`, or `weights` is invalid.
 
     """
     from .tasks import check_tasks, essential_reactions_for_tasks, task_constraints
 
-    draft_ids = {rxn.id for rxn in draft.reactions}
-    free = set(draft_ids) | set(free_reactions or ())
+    tol_val = _validate_positive_finite(tol, "tol")
+    _validate_problem_type(problem_type)
+
+    univ_rxn_ids = {rxn.id for rxn in universal.reactions}
+    _validate_user_weights(weights, univ_rxn_ids, problem_type)
+
+    draft_ids = {rxn.id for rxn in draft.reactions if rxn.id in univ_rxn_ids}
+    free_ids = set(draft_ids) | (set(free_reactions or ()) & univ_rxn_ids)
 
     usable = [
         r.task for r in check_tasks(universal, tasks) if r.ok and not r.task.should_fail
@@ -638,24 +554,31 @@ def gapfill_for_tasks(
         )
 
     if essential_reactions is not None:
-        core = set(essential_reactions)
-    elif core_solve:
-        core, _ = essential_reactions_for_tasks(universal, usable)
+        core = [r for r in essential_reactions if r in univ_rxn_ids]
+    elif core_solve and usable:
+        raw_core, _ = essential_reactions_for_tasks(universal, usable)
+        core = [r for r in sorted(raw_core) if r in univ_rxn_ids]
     else:
-        core = set()
+        core = []
+
     failed: Dict[str, str] = {}
     added: Set[str] = set()
 
+    # Step 1: Core Solve via spectra_ccme so blocked/scaffold reactions never abort Step 1
     if core and core_solve:
-        costs = _inclusion_weights(universal.reactions, free, weights)
+        core_weights = _build_task_core_weights(
+            universal, free_ids, weights, problem_type
+        )
         try:
-            filled = spectra_me(
+            filled, _ = spectra_ccme(
                 universal,
-                sorted(core),
-                tol=tol,
-                weights=costs,
+                core,
+                tol=tol_val,
+                consistency_type=STOICHIOMETRY,
+                weights=core_weights,
                 problem_type=problem_type,
                 time_limit=time_limit,
+                remove_genes=False,
                 seed=seed,
             )
             added |= {rxn.id for rxn in filled.reactions} - draft_ids
@@ -664,36 +587,44 @@ def gapfill_for_tasks(
             logger.warning("the core solve failed (%s)", error)
 
     model = _rebuild(universal, draft_ids | added)
-    if repair:
+
+    # Step 2: Task-by-task repair pass via minNetMILP with monotone non-negative costs
+    if repair and usable:
+        free_extra = set(free_reactions or ())
         for result in check_tasks(model, usable):
             if result.ok:
                 continue
             present = draft_ids | added
-            with task_constraints(universal, result.task) as constrained:
-                costs = _inclusion_weights(
-                    constrained.reactions, present, weights
-                )
-                try:
-                    # Always mixed-integer here, whatever `problem_type` the
-                    # core solve used: repairing one task is a small problem
-                    # and counting reactions exactly is what it is for.
-                    _, solution = spectra_me(
-                        constrained,
-                        [],
-                        tol=tol,
-                        weights=costs,
-                        problem_type=MIN_NET_MILP,
-                        time_limit=time_limit,
-                        remove_genes=False,
-                        seed=seed,
-                        return_solutions=True,
+            try:
+                with task_constraints(universal, result.task) as constrained:
+                    constrained_ids = {r.id for r in constrained.reactions}
+                    task_added_rxns = constrained_ids - univ_rxn_ids
+                    already_there = present | task_added_rxns
+                    is_free_now = already_there | (free_extra & constrained_ids)
+                    repair_cost = _build_task_repair_costs(
+                        constrained=constrained,
+                        universal=universal,
+                        already_there=already_there,
+                        is_free_now=is_free_now,
+                        weights=weights,
+                        problem_type=problem_type,
                     )
-                except (SpectraSolverError, SpectraError) as error:
-                    failed[result.task.id] = f"{type(error).__name__}: {error}"
-                    continue
-            added |= {
-                r for r in solution.included if r in {x.id for x in universal.reactions}
-            } - draft_ids
+                    zero_dirs = {r.id: 0 for r in constrained.reactions}
+                    solution = min_net_milp(
+                        constrained,
+                        zero_dirs,
+                        repair_cost,
+                        tol=tol_val,
+                        steady_state=True,
+                        time_limit=time_limit,
+                        feasibility_tolerance=DEFAULT_SOLVER_TOLERANCE,
+                        optimality_tolerance=DEFAULT_SOLVER_TOLERANCE,
+                        integrality_tolerance=DEFAULT_SOLVER_TOLERANCE,
+                    )
+            except (SpectraSolverError, SpectraError) as error:
+                failed[result.task.id] = f"{type(error).__name__}: {error}"
+                continue
+            added |= (solution.included & univ_rxn_ids) - draft_ids
         model = _rebuild(universal, draft_ids | added)
 
     outcomes = check_tasks(model, usable)
@@ -703,44 +634,19 @@ def gapfill_for_tasks(
         satisfied=tuple(r.task.id for r in outcomes if r.ok),
         unsatisfied=tuple(r.task.id for r in outcomes if not r.ok),
         failed=failed,
+        skipped=tuple(skipped),
     )
 
 
-#: What a community exchange costs under ``minNetMILP``. Non-zero on
-#: purpose: the objective counts reactions, so charging for an exchange
-#: makes the gap-filler prefer a neighbour's secretion over fresh material
-#: from the medium, which is the point of filling a community at all.
+#: What a community exchange costs under ``minNetMILP``.
 MILP_EXCHANGE_WEIGHT = 1.0
 
-#: What one costs under ``minNetLP``, which is nothing. That objective
-#: sums weighted *flux*, and a shared exchange carries the flux of every
-#: unit drawing on it, so charging for it penalises a unit for having
-#: company and the solver pays it off by adding internal reactions.
-#: Reactions added on hCom organisms, weight 1 against weight 0, with
-#: filling each organism separately for comparison: 61/8/9 at two
-#: organisms, 89/17/18 at four, 21/21/31 at six. The charge is fixed per
-#: pool however many units share it, so it stops mattering as a community
-#: grows -- but at six organisms it was still three times slower.
+#: What one costs under ``minNetLP``.
 LP_EXCHANGE_WEIGHT = 0.0
 
 
 def _exchange_weight(given: Optional[float], problem_type: str) -> float:
-    """Return what a community exchange should cost.
-
-    Parameters
-    ----------
-    given : float, optional
-        The caller's choice, or None to take the default for the
-        formulation.
-    problem_type : str
-        The formulation being used.
-
-    Returns
-    -------
-    float
-        The weight.
-
-    """
+    """Return what a community exchange should cost."""
     if given is not None:
         return float(given)
     weight = LP_EXCHANGE_WEIGHT if problem_type == MIN_NET_LP else MILP_EXCHANGE_WEIGHT
@@ -752,23 +658,7 @@ def _exchange_weight(given: Optional[float], problem_type: str) -> float:
 
 @dataclass(frozen=True)
 class CommunityGapfillResult:
-    """What a community gap-fill added, and the model it produced.
-
-    Parameters
-    ----------
-    community : CommunityModel
-        The gap-filled community, with its bookkeeping narrowed to the
-        reactions that survived.
-    added : dict of {str: tuple of str}
-        The reactions each unit took from its database, named as the
-        unit's own model names them.
-    core : tuple of str
-        The reactions the extraction was required to keep.
-    blocked_core : tuple of str
-        Core reactions the consistency check found could not carry flux,
-        and which were therefore not required.
-
-    """
+    """What a community gap-fill added, and the model it produced."""
 
     community: "CommunityModel"
     added: Dict[str, Tuple[str, ...]]
@@ -776,26 +666,11 @@ class CommunityGapfillResult:
     blocked_core: Tuple[str, ...] = ()
 
     def models(self) -> Dict[str, "Model"]:
-        """Return the gap-filled units as models in their own right.
-
-        Returns
-        -------
-        dict of {str: cobra.Model}
-            One model per unit, untagged, with an exchange wherever the
-            unit met a pool.
-
-        """
+        """Return the gap-filled units as models in their own right."""
         return self.community.decompose()
 
     def summary(self) -> str:
-        """Return a one-line account of the result.
-
-        Returns
-        -------
-        str
-            The size of the result and how much was added.
-
-        """
+        """Return a one-line account of the result."""
         total = sum(len(ids) for ids in self.added.values())
         return (
             f"{len(self.community.model.reactions)} reactions across "
@@ -813,32 +688,7 @@ def _community_weights(
     exchange_weight: float,
     overrides: Optional[Mapping[str, float]],
 ) -> Dict[str, float]:
-    """Return the cost of keeping each reaction of a community.
-
-    Parameters
-    ----------
-    community : CommunityModel
-        The community to weight.
-    exchange_weight : float
-        What a community exchange costs.
-    overrides : mapping, optional
-        Weights to use instead, for any reaction.
-
-    Returns
-    -------
-    dict of {str: float}
-        A weight for every reaction in the model.
-
-    Notes
-    -----
-    What a unit already has costs nothing, so the gap-fill is free to keep
-    all of it; what only its database has costs one, so the solver adds as
-    little as it can. Transports between a unit and a pool cost nothing
-    either: in the other pooling mode the units simply share the
-    compartment, and charging for cross-feeding in one mode but not the
-    other would make the two disagree.
-
-    """
+    """Return the cost of keeping each reaction of a community."""
     free: Set[str] = set()
     for ids in community.draft_reactions.values():
         free |= set(ids)
@@ -875,83 +725,7 @@ def gapfill_community(
     time_limit: Optional[float] = 300.0,
     seed: Optional[int] = None,
 ) -> CommunityGapfillResult:
-    """Gap-fill every unit of a community at once.
-
-    Parameters
-    ----------
-    community : CommunityModel
-        A community whose units each hold a database of reactions they
-        may draw on, as built by passing `databases` to
-        :func:`~spectra_cobra.build_community_model`.
-    core_reactions : iterable of str, optional
-        Reactions the result must keep, named as the community model
-        names them.
-    anchors_are_core : bool, optional
-        Whether each unit's anchor reaction is required (default True).
-        This is what makes every unit grow rather than only the ones that
-        happen to be cheapest.
-    weights : mapping of {str: float}, optional
-        Weights to use instead of the defaults, for any reaction. The
-        usual reason is sequence evidence: a reaction the organism's
-        genome supports should cost less than one it does not.
-    exchange_weight : float, optional
-        What a community exchange costs. Left out, it depends on the
-        formulation: 1 for ``minNetMILP``, which counts reactions, and 0
-        for ``minNetLP``, which sums flux and would otherwise charge a
-        unit for the uptake of everything sharing the pool with it.
-    tol : float, optional
-        The minimum flux a core reaction must carry (default 1e-4).
-    problem_type : {"minNetMILP", "minNetLP"}, optional
-        The formulation (default "minNetMILP"). The LP minimises total
-        weighted flux rather than a count, so it is a relaxation: quick,
-        and usually larger.
-    consistency_check : bool, optional
-        Whether to drop the blocked reactions of the joined model before
-        gap-filling (default True). Worth its cost: a database reaction
-        that cannot carry flux in this community is not a candidate, and
-        removing it shrinks the problem.
-    keep_draft : bool, optional
-        Whether to keep every reaction a unit already had, whether or not
-        the solution uses it (default True). This is what separates
-        gap-filling from extraction: the formulation returns the smallest
-        network that meets the requirement, which would otherwise throw
-        away parts of the draft that carry no flux under this one medium.
-    time_limit : float, optional
-        Seconds to spend on the solve (default 300).
-    seed : int, optional
-        A seed for the extraction's randomised coefficients.
-
-    Returns
-    -------
-    CommunityGapfillResult
-        The gap-filled community, and what each unit took.
-
-    Raises
-    ------
-    SpectraError
-        If a named core reaction is not in the community.
-
-    Notes
-    -----
-    Gap-filling the units together rather than one at a time lets a gap
-    in one be closed by another's secretion instead of by a new reaction,
-    which is why the community result is the smaller one.
-
-    Derived from the community-scale gap-filling of
-
-        S, P. K., Sridhar, S., Alsmadi, N., Mahadevan, R., and Bhatt,
-        N. P. (2026). Generalist method to reconstruct metabolic networks
-        from multi-omics data at large-scale. bioRxiv.
-        https://doi.org/10.64898/2026.04.02.716249
-
-    whose community formulation in turn follows
-
-        Giannari, D., Ho, C. H., and Mahadevan, R. (2021). A gap-filling
-        algorithm for prediction of metabolic interactions in microbial
-        communities. *PLOS Computational Biology*, 17(6), e1009060.
-        https://doi.org/10.1371/journal.pcbi.1009060
-
-    """
+    """Gap-fill every unit of a community at once."""
     from .community import ORGANISM_SEPARATOR
     from .consistency import consistent_reaction_ids
 
@@ -961,7 +735,7 @@ def gapfill_community(
         core |= set(community.biomass_reactions.values())
     unknown = core - {rxn.id for rxn in model.reactions}
     if unknown:
-        raise SpectraError(
+        raise SpectraValueError(
             f"These core reactions are not in the community model: "
             f"{sorted(unknown)[:5]}."
         )

@@ -228,6 +228,7 @@ thing it *is*:
    from urllib.request import urlretrieve
 
    from cobra.io import load_matlab_model, load_model
+   from spectra_cobra import build_community_model
 
    AGORA = ("https://raw.githubusercontent.com/VirtualMetabolicHuman/AGORA"
             "/master/CurrentVersion/AGORA_1_03/AGORA_1_03_mat")
@@ -535,8 +536,8 @@ is named recognisably.
 
    .. code-block:: python
 
-      model.objective = {
-          model.reactions.get_by_id(community.biomass_reactions[o]): 1.0
+      community.model.objective = {
+          community.model.reactions.get_by_id(community.biomass_reactions[o]): 1.0
           for o in community.organisms
       }
 

@@ -74,10 +74,10 @@ depends on the choice, so the two columns go together:
 
 | `problem_type`         | Objective                                      | Weights      | Solves |
 |------------------------|------------------------------------------------|--------------|--------|
-| `"minNetLP"` (default) | minimise weighted total absolute flux          | non-negative | 1 LP   |
+| `"minNetLP"` (default) | minimise weighted total absolute flux (IRLS)   | non-negative | 1–5 LPs |
 | `"minNetMILP"`         | minimise weighted reaction count               | non-negative | 1 MILP |
 | `"tradeOff"`           | maximise net weight: positive in, negative out | **any real** | 1 MILP |
-| `"growthOptim"`        | maximise biomass minus weighted flux           | non-negative | 1 LP   |
+| `"optimBiomass"`       | maximise biomass minus weighted flux           | non-negative | 1 LP   |
 
 None of this governs the core reactions. Those are constrained to carry at
 least `tol` whichever `problem_type` you pick, so they are kept by the
@@ -85,10 +85,10 @@ constraints rather than chosen by the objective. What the choice decides is
 which *other* reactions come in around them to make that possible.
 
 The two `minNet` variants target the same thing by different routes.
-`minNetLP` is the L1 relaxation and is by far the cheapest, but it favours
-many small fluxes over few large ones, so it tends to keep more reactions
-than necessary. `minNetMILP` minimises the count exactly. On the textbook
-model the difference is visible: `minNetLP` keeps 27 reactions where
+`minNetLP` combines "With-Chain" median-normalised weights with warm-started
+Split-Variable IRLS and support certification, making it fast enough for
+hundreds of genome-scale runs, while `minNetMILP` minimises the reaction count
+itself. On the textbook model `minNetLP` keeps 32 reactions where
 `minNetMILP` keeps 16.
 
 `tradeOff` is the one to use when your omics data gives both positive and
@@ -108,17 +108,18 @@ Ask for several models with `n_solutions`:
 # Re-run the direction phase with the LPs in a different order.
 models = spectra_me(model, core, n_solutions=5)
 
-# Or forbid each solution already found. Needs a mixed-integer problem_type.
+# Or forbid each solution already found (default for MILP problem_types).
 models = spectra_me(
-    model, core, n_solutions=5,
-    alt_solution_method="pathwayExclusion", problem_type="tradeOff",
+    model, core, n_solutions=5, problem_type="tradeOff",
 )
 ```
 
-`"coreDirection"` varies which direction the core reactions run in, so the
-alternatives may coincide. `"pathwayExclusion"` adds a constraint ruling out
-each reaction set already returned, so every model is genuinely distinct, but
-it only works with `"minNetMILP"` or `"tradeOff"`. If the network runs out of
+`"coreDirection"` (the default for LP formulations `"minNetLP"` and
+`"optimBiomass"`) varies which direction two-way core reactions run in, so the
+alternatives may coincide. `"pathwayExclusion"` (the default for MILP
+formulations `"minNetMILP"` and `"tradeOff"`) adds a constraint ruling out
+each indicator selection already returned, so every model is genuinely distinct,
+and requires `"minNetMILP"` or `"tradeOff"`. If the network runs out of
 alternatives before `n_solutions` is reached, you get the ones that exist
 rather than an error, so check `len()` on the result.
 

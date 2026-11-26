@@ -25,12 +25,11 @@ Why this exists
 
 The first promise always holds; the second does not.
 
-``minNetLP`` and ``growthOptim`` read their answer off a flux vector, keeping
-any reaction whose flux clears ``inclusion_cutoff``. That cutoff defaults to
-``tol * 1e-7``, deliberately far below the solver's own tolerance: raising it
-discards reactions that carry almost no flux but are load-bearing for a mass
-balance, and the chains that relied on them then collapse, leaving **core
-reactions present in the model but unable to carry flux**.
+``minNetLP`` and ``optimBiomass`` read their answer off an LP flux vector and
+run tolerance-derived support certification to prune solver-noise dead ends.
+Raising ``inclusion_cutoff`` manually above load-bearing trace fluxes or
+loosening solver tolerances can still break chains and leave **core reactions
+present in the model but unable to carry flux**.
 
 Keeping the cutoff that low fixes the core reactions at the price of also
 keeping some reactions that are there only because of numerical noise, so the

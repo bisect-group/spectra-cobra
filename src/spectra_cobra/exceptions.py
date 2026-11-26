@@ -5,6 +5,10 @@ class SpectraError(Exception):
     """Base class for every error raised by SPECTRA."""
 
 
+class SpectraValueError(SpectraError, ValueError):
+    """Raised when an argument passed to SPECTRA has an invalid value."""
+
+
 class SpectraSolverError(SpectraError):
     """Raised when an LP or MILP does not reach an acceptable status.
 

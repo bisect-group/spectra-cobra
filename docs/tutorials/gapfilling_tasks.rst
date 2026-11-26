@@ -312,11 +312,14 @@ Arguments worth knowing
 
 ``problem_type``
    The formulation the **core solve** uses -- the one
-   :func:`~spectra_cobra.spectra_me` runs over the universal model. It is
-   ``"minNetMILP"`` by default here, unlike
-   :func:`~spectra_cobra.spectra_me` itself: gap-filling is usually run once
-   on one draft, and the exact answer is worth the mixed-integer solve. Pass
-   ``"minNetLP"`` if it is too slow.
+   :func:`~spectra_cobra.spectra_ccme` runs over the universal model in Step 1.
+   Supports ``"minNetMILP"`` (default), ``"minNetLP"``, ``"tradeOff"`` (with
+   signed real weights converted monotonically to non-negative repair penalties
+   in Step 2), and ``"optimBiomass"`` (keeping positive default reward on
+   objective reactions even when in the draft, without turning objective reward
+   overrides into Step-2 repair penalties). Using ``spectra_ccme`` in Step 1
+   ensures that blocked reactions in an unpruned universal model never abort
+   the core solve.
 
    It does **not** govern the repair below, which is always mixed-integer
    whatever you pass here. Repairing one failing task is a small problem, so
@@ -433,9 +436,9 @@ Those three rows are one function call each, differing only in arguments:
 
 .. code-block:: text
 
-   tradeOff                    2522 reactions,   89 added, 0 failing
-   minNetMILP, repair=False    2448 reactions,   15 added, 1 failing
-   minNetMILP + repair         2449 reactions,   16 added, 0 failing
+   tradeOff                    2446 reactions,   13 added, 0 failing
+   minNetMILP, repair=False    2439 reactions,    6 added, 1 failing
+   minNetMILP + repair         2440 reactions,    7 added, 0 failing
 
 .. list-table::
    :header-rows: 1
@@ -452,36 +455,32 @@ Those three rows are one function call each, differing only in arguments:
      - 6
      - —
    * - ``tradeOff``
-     - 2522
-     - 89
+     - 2446
+     - 13
      - **0**
      - 7.7 s
    * - ``minNetMILP``, ``repair=False``
-     - 2448
-     - 15
+     - 2439
+     - 6
      - 1
      - 6.4 s
    * - ``minNetMILP`` + ``repair``
-     - 2449
-     - 16
+     - 2440
+     - 7
      - **0**
      - 7.8 s
 
 The draft row is the starting point, and the times are wall clock on one
 machine — useful for their ratio rather than their absolute value.
 
-The first two differ by a factor of seven in what they add, and the
-difference is instructive rather than a matter of taste.
-
-``minNetMILP`` adds the minimum: 16 reactions, essentially just the deleted
-essential ones. One task — using acetate as a carbon source — still fails,
+``minNetMILP`` without repair adds the minimum for the essential set: 6
+reactions. One task — using acetate as a carbon source — still fails,
 because it has alternative routes and therefore contributed nothing to the
 core set. This is the warning at the top of the page, happening.
 
-``tradeOff`` adds 109 and fixes everything, but not because it understood the
-problem better. Signed weights make it *reward* including draft reactions, so
-it builds a larger active network, and the extra reactions happen to restore
-the acetate route. That is luck, and on another draft it would not be.
+``tradeOff`` defaults to ``0`` on draft reactions and ``-1`` penalty on
+candidate additions (and accepts signed omics evidence weights when supplied),
+adding 13 reactions here and passing all tasks after the Step-2 repair check.
 
 ``tradeOff`` works here, but note the condition that makes it work: the core
 is a set of metabolic reactions. Make biomass the core instead and
@@ -497,9 +496,7 @@ the tasks after the extraction and, for any still failing, solves once more
 inside that task's own constraints — where the model is already forced to
 perform it, so minimising the reactions not already present gives the
 cheapest repair directly. Here it cost one extra reaction and one extra
-solve, and took the failures to zero: 2449 reactions against ``tradeOff``'s
-2522. Minimise, then repair what the core could not express — 73 reactions
-smaller, and correct for a reason rather than by accident.
+solve, and took the failures to zero: 2440 reactions total (7 added).
 
 Where this fits
 ---------------
@@ -549,8 +546,8 @@ extraction yourself, then repair:
 
 .. code-block:: text
 
-   context-specific model: 207 reactions
-   after repair: 219 reactions, 23/23 tasks
+   context-specific model: 190 reactions
+   after repair: 444 reactions, 23/23 tasks
 
 ``core_solve=False`` is what stops the second call redoing the first. The
 repair still runs, so the tasks the core set could not guarantee are still

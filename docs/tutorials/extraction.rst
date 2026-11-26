@@ -24,10 +24,10 @@ The basic case
 .. code-block:: text
 
    87
-   27
+   32
    True
 
-From 87 consistent reactions down to 27, and the core reaction is in there.
+From 87 consistent reactions down to 32, and the core reaction is in there.
 Note the order: consistency first, extraction second.
 :func:`~spectra_cobra.spectra_me` requires a consistent model, because it has
 to be able to drive every core reaction past ``tol`` simultaneously.
@@ -43,13 +43,13 @@ The core set grows the model as needed
 
 .. code-block:: text
 
-   ['PGI'] -> 27 reactions
-   ['PGI', 'PFK', 'FBA'] -> 27 reactions
-   ['SUCDi', 'FUM'] -> 37 reactions
+   ['PGI'] -> 32 reactions
+   ['PGI', 'PFK', 'FBA'] -> 32 reactions
+   ['SUCDi', 'FUM'] -> 32 reactions
 
 Adding ``PFK`` and ``FBA`` to ``PGI`` costs nothing — they are on the same
-glycolytic route, which was already pulled in. Asking for two TCA reactions
-instead costs ten more, since that part of the network needs more support.
+glycolytic route, which was already pulled in, and asking for two TCA
+reactions lands on a 32-reaction subnetwork as well.
 
 Specifying the core set
 -----------------------
@@ -113,7 +113,7 @@ your core set, let :func:`~spectra_cobra.spectra_ccme` do both:
 
 .. code-block:: text
 
-   27 reactions
+   32 reactions
    dropped as blocked: ['FRUpts2']
 
 It reports what it dropped rather than failing, which is usually what you
@@ -171,11 +171,11 @@ process. The solver is the remaining source of variation.
 Which formulation to extract with
 ---------------------------------
 
-Everything above used the default, ``problem_type="minNetLP"``: one LP,
-minimising total absolute flux. ``"minNetMILP"`` asks the same question
-exactly rather than through a relaxation and so returns a smaller model --
-16 reactions against 27 for the core set used here -- but it is a
-mixed-integer solve, and that is where the cost lands.
+Everything above used the default, ``problem_type="minNetLP"``: warm-started
+iteratively reweighted L1, minimising weighted absolute flux. ``"minNetMILP"``
+asks the same question exactly rather than through a relaxation and so returns
+a smaller model -- 16 reactions against 32 for the core set used here -- but it
+is a mixed-integer solve, and that is where the cost lands.
 
 All four formulations keep every core reaction. The core is pinned by the
 directions settled in phase one, not by the objective, so the choice changes

@@ -20,7 +20,7 @@ single out a direction need the sign.
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Dict, Iterator, Optional, Tuple
 
-from .exceptions import SpectraError
+from .exceptions import SpectraValueError
 
 if TYPE_CHECKING:
     from cobra.core import Model, Reaction
@@ -136,7 +136,7 @@ def validate_consistency_type(consistency_type: str) -> bool:
 
     """
     if consistency_type not in CONSISTENCY_TYPES:
-        raise SpectraError(
+        raise SpectraValueError(
             f"consistency_type must be one of {CONSISTENCY_TYPES}, "
             f"not {consistency_type!r}."
         )
@@ -213,13 +213,11 @@ def apply_direction_bounds(
     -----
     Every formulation shares this bound rewrite, in the oriented frame::
 
-        lb(direction == 1) = max(tol, lb(direction == 1));
-        ub(direction == -1) = -tol;
+        lb(direction == 1)  = max(tol, lb(direction == 1));
+        ub(direction == -1) = min(-tol, ub(direction == -1));
 
-    expressed here in the model's own flux frame instead. Note the asymmetry:
-    for ``direction == -1`` the upper bound is *assigned* ``-tol`` rather than
-    taking a minimum, so a reaction whose oriented upper bound already sits
-    below ``-tol`` has it raised.
+    expressed here in the model's own flux frame instead, preserving any
+    tighter bound already present on the reaction.
 
     """
     for rxn_id, direction in directions.items():
@@ -233,7 +231,7 @@ def apply_direction_bounds(
         if direction == 1:
             lower = max(tol, lower)
         else:
-            upper = -tol
+            upper = min(-tol, upper)
 
         # Map the oriented bounds back onto the reaction's own frame.
         if sign > 0:

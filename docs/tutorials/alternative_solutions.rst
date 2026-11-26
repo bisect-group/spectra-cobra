@@ -21,14 +21,14 @@ list of models.
 Two methods
 -----------
 
-``"pathwayExclusion"``
-   Adds a constraint forbidding each reaction set already returned, so every
+``"pathwayExclusion"`` (default for MILP formulations ``"minNetMILP"`` and ``"tradeOff"``)
+   Adds a constraint forbidding each indicator set already returned, so every
    model is genuinely different. Needs a mixed-integer ``problem_type``.
 
-``"coreDirection"`` (the default)
-   Re-runs the direction phase with the two LPs in a random order, so the core
-   reactions may run the other way and pull in a different network. Works with
-   any ``problem_type``, but the alternatives are not guaranteed to differ.
+``"coreDirection"`` (default for LP formulations ``"minNetLP"`` and ``"optimBiomass"``)
+   Re-runs the direction phase with the two LPs in a random order, so two-way
+   core reactions may run the other way and pull in a different network. Works
+   with any ``problem_type``, but the alternatives are not guaranteed to differ.
 
 Pathway exclusion
 -----------------
@@ -108,7 +108,7 @@ Core direction
 
 .. code-block:: text
 
-   [27, 36, 27]
+   [32, 40, 40]
    3 models, 2 distinct
 
 This is the cheaper option — it needs no MILP — but as that output shows, it

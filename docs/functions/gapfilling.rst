@@ -8,7 +8,10 @@ you make.
 
 :func:`~spectra_cobra.gapfill_for_growth` requires the model to grow, in
 each of a panel of media. :func:`~spectra_cobra.gapfill_for_tasks` requires
-it to perform a list of :doc:`tasks`.
+it to perform a list of :doc:`tasks` — supporting all four formulations
+(``"minNetMILP"``, ``"minNetLP"``, ``"tradeOff"``, and ``"optimBiomass"``)
+via :func:`~spectra_cobra.spectra_ccme` in Step 1 followed by task-by-task
+``"minNetMILP"`` repair in Step 2.
 
 Usage
 -----

@@ -25,17 +25,21 @@ identifiers that turned out to be blocked and so are absent from it.
 How it works
 ------------
 
-The consistency loop of :doc:`spectra_cc` runs first, but the flux it finds is
-kept rather than discarded, so the core directions are read off it instead of
-being recomputed. That saves a pass over the model compared with running the
-two functions in sequence. The network inference step is then the same as in
-:doc:`spectra_me`.
+Stage 1a prunes structural dead ends in 0 LPs, then runs a core-scoped
+pinned ``forward_cc``/``reverse`` loop (sharing one random weight draw
+:math:`w_i \sim U(1, 1.1)` per round, with zero convex combinations) together
+with an unpinned verification guard so mutually conflicting finite-bound core
+reactions emit a warning rather than being misreported in ``blocked_core``.
+Stage 1b refines two-way active core signs with a 1-LP Anchor when applicable,
+and Stage 2 dispatches to the chosen formulation with consistency certification,
+returning a copy with original cobrapy reaction orientations and bounds
+preserved.
 
 Arguments worth knowing
 -----------------------
 
-Everything :doc:`spectra_me` takes is accepted here too, with four
-exceptions noted at the end.
+Everything :doc:`spectra_me` takes (except ``previous_solutions``) is accepted
+here too.
 
 ``core_reactions``
    Accepts reaction identifiers, :class:`cobra.Reaction` objects, or integer
@@ -54,13 +58,13 @@ exceptions noted at the end.
 
 ``problem_type``
    One of ``"minNetLP"`` (default), ``"minNetMILP"``, ``"tradeOff"`` or
-   ``"growthOptim"``.
+   ``"optimBiomass"``.
 
 ``n_solutions`` and ``alt_solution_method``
    For several alternative models; see
-   :doc:`../tutorials/alternative_solutions`. ``alt_solution_method`` is
-   ``"coreDirection"`` by default, with ``"pathwayExclusion"`` available for
-   the mixed-integer formulations.
+   :doc:`../tutorials/alternative_solutions`. ``alt_solution_method`` defaults
+   to ``"coreDirection"`` for LP formulations and ``"pathwayExclusion"`` for
+   MILP formulations.
 
 ``time_limit``
    Seconds to spend on a mixed-integer solve (default 7200). A solution
@@ -98,13 +102,10 @@ exceptions noted at the end.
    ``problem_type`` values; neither the consistency check nor the linear
    formulations have binaries.
 
-Not accepted here
------------------
-
-``indicator_reactions``, ``indicator_groups``, ``previous_solutions`` and
-``return_solutions`` belong to :doc:`spectra_me` alone. If you need them on a
-model that may be inconsistent, run :doc:`spectra_cc` first and then
-:doc:`spectra_me`, which is what this function does internally anyway.
+``indicator_reactions``, ``indicator_groups``, and ``return_solutions``
+   Supported directly on :func:`~spectra_cobra.spectra_ccme` for MILP group
+   selection and solution inspection. To pass explicit ``previous_solutions``,
+   run :doc:`spectra_cc` followed by :doc:`spectra_me`.
 
 Reference
 ---------

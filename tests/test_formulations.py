@@ -7,8 +7,10 @@ from cobra import Model, Reaction
 
 from spectra_cobra import (
     SpectraError,
+    SpectraValueError,
     min_net_lp,
     min_net_milp,
+    optim_biomass,
     trade_off,
 )
 from spectra_cobra._orientation import reaction_signs
@@ -184,12 +186,7 @@ def test_orientation_of_negative_only_reactions(backwards_model: Model) -> None:
 
 
 def test_inclusion_cutoff_defaults_below_solver_tolerance(toy_model: Model) -> None:
-    """The default cutoff is tol * 1e-7, not floored at model.tolerance.
-
-    Flooring it at the solver tolerance is what left extracted models holding
-    blocked core reactions, so the floor's absence is the behaviour under
-    test rather than an oversight.
-    """
+    """The MILP trace-flux cutoff defaults to tol * 1e-7, not floored at model.tolerance."""
     import spectra_cobra.formulations as module
     from spectra_cobra.formulations import INCLUSION_CUTOFF_FACTOR
 
@@ -213,7 +210,7 @@ def test_inclusion_cutoff_defaults_below_solver_tolerance(toy_model: Model) -> N
 
     module._included_reactions = spy
     try:
-        min_net_lp(toy_model, directions, _ones(toy_model), tol)
+        min_net_milp(toy_model, directions, _ones(toy_model), tol)
     finally:
         module._included_reactions = original
 
@@ -836,3 +833,112 @@ def test_a_warm_start_does_not_change_the_answer(toy_model: Model) -> None:
     assert len(with_start.included) == len(without.included)
     assert "R5" in with_start.included
     assert len(with_start.included) < len(everything)
+
+
+# --------------------------------------------------------------------------
+# v2 parity tests: signed weights, chain multipliers, zero_feas, indicator_groups
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("func", (min_net_lp, min_net_milp, optim_biomass))
+def test_non_tradeoff_formulations_reject_negative_weights_with_value_error(
+    toy_model: Model, func
+) -> None:
+    """minNetLP, minNetMILP, and optimBiomass explicitly raise ValueError on negative weights."""
+    weights = _ones(toy_model)
+    weights["R2"] = -0.5
+    with pytest.raises((SpectraValueError, ValueError), match="non-negative"):
+        func(toy_model, {"R3": 1}, weights, 1e-4)
+
+
+def test_trade_off_supports_indicator_groups_with_signed_weights(
+    toy_model: Model,
+) -> None:
+    """tradeOff supports shared binary groups with signed real weights."""
+    groups = {
+        "route_1": ["R1", "R2", "R3", "R4"],
+        "route_2": ["R6", "R7", "R8"],
+        "route_3": ["R9", "R10", "R11"],
+    }
+    weights = {"route_1": -3.0, "route_2": 5.0, "route_3": -2.0}
+    sol = trade_off(
+        toy_model, {"R5": 1}, weights, 1e-4, indicator_groups=groups
+    )
+    assert sol.selected == {"route_2"}
+    assert sol.included == {"R5", "R6", "R7", "R8"}
+
+
+def test_apply_direction_bounds_preserves_tighter_negative_upper_bound(
+    reversible_model: Model,
+) -> None:
+    """ub[direction == -1] = min(-tol, ub) preserves an already-tighter negative bound."""
+    from spectra_cobra._orientation import apply_direction_bounds
+
+    reversible_model.reactions.R2.bounds = (-10.0, -2.0)
+    signs = {"R1": 1.0, "R2": 1.0, "R3": 1.0}
+    with reversible_model:
+        apply_direction_bounds(reversible_model, {"R2": -1}, signs, tol=1e-4)
+        assert reversible_model.reactions.R2.bounds == (-10.0, -2.0)
+
+
+def test_optim_biomass_reduces_to_l1_without_objective(toy_model: Model) -> None:
+    """When model.objective has no nonzero entries, optim_biomass reduces cleanly to L1."""
+    toy_model.objective = toy_model.problem.Objective(0)
+    kept = optim_biomass(toy_model, {"R3": 1}, _ones(toy_model), 1e-4)
+    assert kept == {"R1", "R2", "R3", "R4", "R5"}
+
+
+def test_zero_feas_skips_all_solver_calls_across_all_four_formulations(
+    toy_model: Model, monkeypatch
+) -> None:
+    """When direction == 0 and v = 0 is feasible, zero_feas skips 100% of solves."""
+    calls = []
+    monkeypatch.setattr(
+        Model, "slim_optimize", lambda self, *a, **k: calls.append(1)
+    )
+
+    dirs = _all_free(toy_model)
+    pos_w = _ones(toy_model)
+    neg_w = {r.id: -1.0 for r in toy_model.reactions}
+    zero_obj_w = dict(pos_w, R5=0.0)
+
+    assert min_net_lp(toy_model, dirs, pos_w, 1e-4) == set()
+    assert min_net_milp(toy_model, dirs, pos_w, 1e-4).included == set()
+    assert trade_off(toy_model, dirs, neg_w, 1e-4).included == set()
+    assert optim_biomass(toy_model, dirs, zero_obj_w, 1e-4) == set()
+    assert calls == []
+
+
+def test_with_chain_weights_penalise_long_unbranched_chain_in_min_net_lp(
+    solver: str,
+) -> None:
+    """'With-Chain' degree-2 multipliers help minNetLP prefer shorter routes over equal-flux longer chains."""
+    from cobra import Metabolite
+
+    model = Model("chain_vs_short")
+    mets = [Metabolite(m) for m in ("s", "x1", "x2", "x3", "t")]
+    model.add_metabolites(mets)
+    specs = [
+        ("IN", {"s": 1.0}),
+        ("SHORT", {"s": -1.0, "t": 1.0}),
+        ("LONG1", {"s": -1.0, "x1": 1.0}),
+        ("LONG2", {"x1": -1.0, "x2": 1.0}),
+        ("LONG3", {"x2": -1.0, "x3": 1.0}),
+        ("LONG4", {"x3": -1.0, "t": 1.0}),
+        ("OUT", {"t": -1.0}),
+    ]
+    rxns = [Reaction(rid, lower_bound=0.0, upper_bound=10.0) for rid, _ in specs]
+    model.add_reactions(rxns)
+    for rid, stoich in specs:
+        model.reactions.get_by_id(rid).add_metabolites(
+            {model.metabolites.get_by_id(m): c for m, c in stoich.items()}
+        )
+    model.solver = solver
+
+    # Make raw sum of weights on LONG1..LONG4 equal 0.8 < SHORT=1.0, while m_chain=4 gives 4*0.2*4=3.2 > 1.0!
+    w = {r.id: 1.0 for r in model.reactions}
+    for rid in ("LONG1", "LONG2", "LONG3", "LONG4"):
+        w[rid] = 0.2
+    kept = min_net_lp(model, {"OUT": 1}, w, 1e-4, steady_state=True)
+    assert kept == {"IN", "SHORT", "OUT"}
+

@@ -20,15 +20,23 @@ How it works
 
 Two phases.
 
-**Phase 1, settling directions.** The forward and reverse LPs alternate over
-the core reactions, accumulating a flux vector whose signs say which direction
-each core reaction should run in. Successive solutions are blended as a convex
-combination, :math:`c \cdot v_{old} + (1 - c) \cdot v_{new}` with :math:`c`
-drawn from [0.45, 0.55], so a direction preference carries across iterations.
+**Phase 1, discovering core directions.** Core reactions are first classified
+in 0 LPs by bound reachability at ``tol``: empty core sets and all-one-way
+core sets skip 100% of Stage-1 LPs, and bound-unreachable core reactions raise
+:class:`~spectra_cobra.SpectraInfeasibleCoreError` immediately. When two-way
+reversible core reactions exist alongside fixed flux, a single Pass-0
+``minNetLP`` Anchor LP steers directions along low-cost (or non-penalised
+``tradeOff``) pathways, and any remaining unsettled two-way core reactions are
+settled by iterative pinned ``forward``/``reverse`` LPs sharing one random
+weight draw :math:`w_i \sim U(1, 1.1)` per round (with zero convex
+combinations). Reverse-only irreversible reactions (``upper_bound <= 0``) are
+oriented internally during optimisation and returned with their original
+cobrapy stoichiometry and bounds intact.
 
 **Phase 2, network inference.** One optimisation problem picks the rest of the
-network subject to those directions. Which problem is up to you; see
-:doc:`formulations`.
+network subject to those directions (imposing :math:`|v_i| \ge \text{tol}`
+simultaneously across all core reactions along their settled directions). Which
+problem is up to you; see :doc:`formulations`.
 
 Arguments worth knowing
 -----------------------
@@ -44,11 +52,13 @@ Arguments worth knowing
 
 ``problem_type``
    One of ``"minNetLP"`` (default), ``"minNetMILP"``, ``"tradeOff"`` or
-   ``"growthOptim"``.
+   ``"optimBiomass"``.
 
 ``n_solutions`` and ``alt_solution_method``
    For several alternative models; see
-   :doc:`../tutorials/alternative_solutions`.
+   :doc:`../tutorials/alternative_solutions`. When ``alt_solution_method`` is
+   ``None`` (the default), selects ``"coreDirection"`` for LP formulations and
+   ``"pathwayExclusion"`` for MILP formulations.
 
 ``seed``
    Pins the randomised objective coefficients so a run is reproducible.
@@ -83,7 +93,15 @@ Arguments worth knowing
    :doc:`../tutorials/recon3d` for what each one costs when it is wrong.
 
    ``integrality_tolerance`` reaches only the mixed-integer ``problem_type``
-   values; ``minNetLP`` and ``growthOptim`` have no binaries for it to act on.
+   values; ``minNetLP`` and ``optimBiomass`` have no binaries for it to act on.
+
+Thermodynamic cone extraction (``spectra_me2``)
+-----------------------------------------------
+
+:func:`~spectra_cobra.spectra_me2` extracts a subnetwork on the pure
+thermodynamic cone — replacing finite flux bounds with ``(-inf, inf)``,
+``(0, inf)``, or ``(-inf, 0)`` according to reaction reversibility — while
+preserving original cobrapy reaction orientations.
 
 Errors
 ------
@@ -97,6 +115,8 @@ Reference
 ---------
 
 .. autofunction:: spectra_cobra.spectra_me
+
+.. autofunction:: spectra_cobra.spectra_me2
 
 See also
 --------

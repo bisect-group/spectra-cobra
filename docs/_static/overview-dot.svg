@@ -142,7 +142,7 @@
 <text xml:space="preserve" text-anchor="start" x="612.59" y="-800.4" font-family="Courier,monospace" font-size="10.00" fill="#8c4428">min Σ wᵢzᵢ   zᵢ ∈ {0,1}</text>
 <text xml:space="preserve" text-anchor="start" x="536.59" y="-778.15" font-family="Courier,monospace" font-weight="bold" font-size="10.00" fill="#8c4428">tradeOff</text>
 <text xml:space="preserve" text-anchor="start" x="612.59" y="-777.65" font-family="Courier,monospace" font-size="10.00" fill="#8c4428">max Σ wᵢzᵢ   wᵢ any real</text>
-<text xml:space="preserve" text-anchor="start" x="536.59" y="-755.4" font-family="Courier,monospace" font-weight="bold" font-size="10.00" fill="#8c4428">growthOptim</text>
+<text xml:space="preserve" text-anchor="start" x="536.59" y="-755.4" font-family="Courier,monospace" font-weight="bold" font-size="10.00" fill="#8c4428">optimBiomass</text>
 <text xml:space="preserve" text-anchor="start" x="612.59" y="-754.9" font-family="Courier,monospace" font-size="10.00" fill="#8c4428">max Σ𝒸 wᵢvᵢ − Σ wᵢtᵢ</text>
 </g>
 <!-- PT&#45;&gt;FORM -->

@@ -25,8 +25,8 @@ want to supply the reaction directions yourself.
      - :func:`~spectra_cobra.trade_off`
      - maximise net weight: positive in, negative out
      - **any real**
-   * - ``"growthOptim"``
-     - :func:`~spectra_cobra.growth_optim`
+   * - ``"optimBiomass"``
+     - :func:`~spectra_cobra.optim_biomass`
      - maximise objective flux minus weighted flux
      - non-negative
 
@@ -47,9 +47,9 @@ reaction. Two arguments change that.
 
 ``indicator_groups``
    Give the reactions of each group **one shared binary**, so they are kept
-   or dropped together and cost the group's weight once however many of them
-   there are. ``minNetMILP`` only, and mutually exclusive with
-   ``indicator_reactions``.
+   or dropped together and cost (or score) the group's weight once however
+   many of them there are. Supported by both ``minNetMILP`` and ``tradeOff``,
+   and mutually exclusive with ``indicator_reactions``.
 
 .. math::
 
@@ -68,9 +68,9 @@ own identifier, which is the ordinary formulation and why
 :attr:`~spectra_cobra.MilpSolution.selected` reads as a set of reactions.
 With groups it is a set of group keys.
 
-``tradeOff`` takes ``indicator_reactions`` but not ``indicator_groups``: a
-reversible reaction there gets two further binaries of its own, which a
-shared indicator would have to govern too.
+In ``tradeOff``, switching a group binary :math:`z_g = 1` requires every
+governed member :math:`i \in g` to carry at least ``tol`` of flux (with
+:math:`a_i + b_i = z_g` on reversible members).
 
 Directions
 ----------
@@ -106,12 +106,17 @@ Note that these return a **set of reaction identifiers**, not a model —
 The mathematics
 ---------------
 
-**minNetLP** is an L1 relaxation of minimising the reaction count:
+**minNetLP** computes "With-Chain" median-normalised non-negative weights
+(scaling positive open non-core reaction weights by their degree-2 linear
+chain length in ``stoichiometry`` mode) and solves a warm-started
+Split-Variable iteratively reweighted L1 sequence
+(``deltas = [1e-3, 1e-5, 1e-6, 1e-8]``) followed by tolerance-derived support
+certification:
 
 .. math::
 
-   \text{minimize} \quad \sum_i w_i t_i
-   \qquad \text{s.t.} \quad t_i \ge |v_i|, \; S v = 0, \; v \in B
+   \text{minimize} \quad \sum_i w_i^{(t)} |v_i|
+   \qquad \text{s.t.} \quad S v = 0, \; v \in B
 
 **minNetMILP** minimises the count itself, with a binary per free reaction:
 
@@ -134,9 +139,17 @@ irreversible reaction gets one binary; a free *reversible* one gets two more,
                      & \hat v_i \le ub_i a_i - \varepsilon b_i
 
 where :math:`\hat v` is the oriented flux. With
-:math:`a_i = b_i = 0` these pin the flux to zero.
+:math:`a_i = b_i = 0` these pin the flux to zero. Note that because
+``tradeOff`` maximises :math:`\sum_i w_i z_i` subject only to steady-state
+mass balance and bounds, any disconnected internal stoichiometrically balanced
+cycle (Type III loop) with net positive weight can circulate flux of at least
+:math:`\varepsilon` independently of the core set and boundary exchanges. In
+both ``minNetMILP`` and ``tradeOff``, the returned reaction set is the union of
+core reactions, switched-on indicators (:math:`z_i \ge 0.5`), and reactions
+with :math:`|v_i| \ge 10^{-7}\varepsilon`, while ``previous_solutions``
+exclusion cuts constrain the switched-on indicator sets directly.
 
-**growthOptim** rewards the objective reactions :math:`c` and charges for
+**optimBiomass** rewards the objective reactions :math:`c` and charges for
 everything else:
 
 .. math::
@@ -153,7 +166,7 @@ Reference
 
 .. autofunction:: spectra_cobra.trade_off
 
-.. autofunction:: spectra_cobra.growth_optim
+.. autofunction:: spectra_cobra.optim_biomass
 
 See also
 --------

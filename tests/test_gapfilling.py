@@ -288,3 +288,136 @@ def test_one_medium_is_not_mistaken_for_a_labelled_panel() -> None:
     assert _as_labelled(one) == [("medium_0", one)]
     assert [label for label, _ in _as_labelled({"a": one, "b": one})] == ["a", "b"]
     assert [label for label, _ in _as_labelled([one, one])] == ["medium_0", "medium_1"]
+
+
+# --------------------------------------------------------------------------
+# v2 parity tests: all four problem_types in gapfill_for_tasks, signed
+# tradeOff weights, optimBiomass objective reward handling, and unpruned
+# universal models with blocked reactions.
+# --------------------------------------------------------------------------
+
+
+def _task_fixture(universal: Model):
+    """Build two ATP/glutamate tasks and a gapped draft from the textbook model."""
+    from spectra_cobra import TaskEquation
+
+    atp = TaskEquation(
+        {"atp_c": -1, "h2o_c": -1, "adp_c": 1, "pi_c": 1, "h_c": 1}, (1.0, 1000.0)
+    )
+    medium = {
+        "glc__D_e": (0, 1000),
+        "o2_e": (0, 1000),
+        "nh4_e": (0, 1000),
+        "pi_e": (0, 1000),
+        "h2o_e": (0, 1000),
+        "h_e": (0, 1000),
+    }
+    waste = {"co2_e": (0, 1000), "h2o_e": (0, 1000), "h_e": (0, 1000), "ac_e": (0, 1000), "etoh_e": (0, 1000), "for_e": (0, 1000)}
+    tasks = [
+        MetabolicTask("atp_aer", inputs=medium, outputs=waste, equations=(atp,)),
+        MetabolicTask(
+            "atp_anaer",
+            inputs={k: v for k, v in medium.items() if k != "o2_e"},
+            outputs=waste,
+            equations=(atp,),
+        ),
+        MetabolicTask(
+            "glutamate", inputs=medium, outputs={"glu__L_c": (0.1, 1000), **waste}
+        ),
+    ]
+    task_draft = universal.copy()
+    task_draft.remove_reactions(
+        ["CYTBD", "ACALD", "GLUSy", "AKGDH"], remove_orphans=False
+    )
+    return task_draft, tasks
+
+
+@pytest.mark.parametrize(
+    "prob_type", ("minNetMILP", "minNetLP", "tradeOff", "optimBiomass")
+)
+def test_gapfill_for_tasks_supports_all_four_problem_types(
+    universal: Model, prob_type: str
+) -> None:
+    """gapfill_for_tasks succeeds across minNetMILP, minNetLP, tradeOff, and optimBiomass."""
+    task_draft, tasks = _task_fixture(universal)
+    result = gapfill_for_tasks(
+        task_draft, universal, tasks, tol=1e-3, problem_type=prob_type, seed=0
+    )
+    assert result.unsatisfied == (), result.summary()
+    assert set(result.satisfied) == {"atp_aer", "atp_anaer", "glutamate"}
+
+
+def test_gapfill_for_tasks_signed_tradeoff_weights_and_optim_biomass_override(
+    universal: Model,
+) -> None:
+    """Signed tradeOff weights and optimBiomass objective reward overrides work cleanly."""
+    from spectra_cobra import SpectraValueError
+
+    task_draft, tasks = _task_fixture(universal)
+
+    # Signed tradeOff weights: negative penalty on CYTBD, positive evidence on ACALD
+    signed_res = gapfill_for_tasks(
+        task_draft,
+        universal,
+        tasks,
+        tol=1e-3,
+        problem_type="tradeOff",
+        weights={"CYTBD": -5.0, "ACALD": 2.0},
+        seed=0,
+    )
+    assert signed_res.unsatisfied == ()
+
+    # optimBiomass: large positive reward on biomass objective must not penalise biomass in Step-2 repair
+    biomass_id = next(r.id for r in universal.reactions if r.objective_coefficient != 0)
+    bio_res = gapfill_for_tasks(
+        task_draft,
+        universal,
+        tasks,
+        tol=1e-3,
+        problem_type="optimBiomass",
+        weights={biomass_id: 1000.0},
+        seed=0,
+    )
+    assert bio_res.unsatisfied == ()
+
+    # Non-tradeOff formulations reject negative weights with ValueError
+    for p in ("minNetMILP", "minNetLP", "optimBiomass"):
+        with pytest.raises((SpectraValueError, ValueError), match="non-negative"):
+            gapfill_for_tasks(
+                task_draft,
+                universal,
+                tasks,
+                problem_type=p,
+                weights={"CYTBD": -1.0},
+            )
+
+    # Removed growthOptim is rejected
+    with pytest.raises((SpectraValueError, ValueError)):
+        gapfill_for_tasks(task_draft, universal, tasks, problem_type="growthOptim")
+
+
+def test_gapfill_for_tasks_step1_survives_blocked_core_in_unpruned_universal(
+    universal: Model,
+) -> None:
+    """Step 1 uses spectra_ccme so a blocked essential reaction in universal never aborts Step 1."""
+    from cobra import Metabolite, Reaction
+
+    task_draft, tasks = _task_fixture(universal)
+    unpruned = universal.copy()
+    dead_met = Metabolite("dead_met_c", compartment="c")
+    unpruned.add_metabolites([dead_met])
+    dead_rxn = Reaction("DEAD_CORE", lower_bound=0.0, upper_bound=10.0)
+    unpruned.add_reactions([dead_rxn])
+    dead_rxn.add_metabolites({dead_met: 1.0})
+
+    result = gapfill_for_tasks(
+        task_draft,
+        unpruned,
+        tasks,
+        tol=1e-3,
+        essential_reactions=["DEAD_CORE", "GLUSy"],
+        seed=0,
+    )
+    assert "essential_reactions" not in result.failed
+    assert result.unsatisfied == ()
+
