@@ -1316,12 +1316,23 @@ def _min_net_milp_core(
         solution = _milp_solution(
             model, directions, indicators, groups, tol_val, inclusion_cutoff
         )
-        return (
-            MilpSolution(
-                included=solution.included | always_keep, selected=solution.selected
-            ),
-            v_sol,
-        )
+        bin_set = _included_from_indicators(directions, indicators, groups) | always_keep
+        full_set = solution.included | always_keep
+
+    if inclusion_cutoff is not None:
+        return MilpSolution(included=full_set, selected=solution.selected), v_sol
+
+    cert_set, v_cert = _resolve_milp_support_option_c(
+        model=model,
+        directions=directions,
+        signs=signs,
+        tol_val=tol_val,
+        steady_state=steady_state,
+        bin_set=bin_set,
+        full_set=full_set,
+        v_sol=v_sol,
+    )
+    return MilpSolution(included=cert_set, selected=solution.selected), v_cert
 
 
 def min_net_milp(
@@ -1613,12 +1624,23 @@ def _trade_off_core(
         solution = _milp_solution(
             model, directions, indicators, groups, tol_val, inclusion_cutoff
         )
-        return (
-            MilpSolution(
-                included=solution.included | always_keep, selected=solution.selected
-            ),
-            v_sol,
-        )
+        bin_set = _included_from_indicators(directions, indicators, groups) | always_keep
+        full_set = solution.included | always_keep
+
+    if inclusion_cutoff is not None:
+        return MilpSolution(included=full_set, selected=solution.selected), v_sol
+
+    cert_set, v_cert = _resolve_milp_support_option_c(
+        model=model,
+        directions=directions,
+        signs=signs,
+        tol_val=tol_val,
+        steady_state=steady_state,
+        bin_set=bin_set,
+        full_set=full_set,
+        v_sol=v_sol,
+    )
+    return MilpSolution(included=cert_set, selected=solution.selected), v_cert
 
 
 def trade_off(
@@ -1917,6 +1939,75 @@ def _effective_milp_feas_tol(
     except Exception:  # noqa: BLE001
         pass
     return DEFAULT_SOLVER_TOLERANCE
+
+
+def _resolve_milp_support_option_c(
+    model: "Model",
+    directions: Dict[str, int],
+    signs: Mapping[str, float],
+    tol_val: float,
+    steady_state: bool,
+    bin_set: Set[str],
+    full_set: Set[str],
+    v_sol: np.ndarray,
+) -> Tuple[Set[str], np.ndarray]:
+    """Option C MILP support certification: verify `bin_set` or run minimal L1 trace rescue."""
+    extra_trace = full_set - bin_set
+    if not extra_trace:
+        return bin_set, v_sol
+
+    rxn_list = list(model.reactions)
+    rxn_ids = [r.id for r in rxn_list]
+    idx_of = {rid: i for i, rid in enumerate(rxn_ids)}
+    cutoff = tol_val * INCLUSION_CUTOFF_FACTOR
+
+    try:
+        # Step 1: 1-LP feasibility check on `bin_set` alone
+        with model, relaxed_mass_balance(model, steady_state):
+            apply_direction_bounds(model, directions, signs, tol_val)
+            feasible_bounds = True
+            for rxn in rxn_list:
+                if rxn.id not in bin_set:
+                    if rxn.lower_bound > 0.0 or rxn.upper_bound < 0.0:
+                        feasible_bounds = False
+                        break
+                    rxn.bounds = (0.0, 0.0)
+            if feasible_bounds:
+                model.objective = model.problem.Objective(Zero, direction="min")
+                model.solver.optimize()
+                if model.solver.status == OPTIMAL:
+                    v_chk = _read_flux_vector(model)
+                    for rid in set(rxn_ids) - bin_set:
+                        v_chk[idx_of[rid]] = 0.0
+                    return bin_set, v_chk
+
+        # Step 2: 1-LP minimal L1 rescue over `extra_trace` (e.g. trace iron/cofactors)
+        with model, relaxed_mass_balance(model, steady_state):
+            apply_direction_bounds(model, directions, signs, tol_val)
+            for rxn in rxn_list:
+                if rxn.id not in full_set:
+                    if rxn.lower_bound > 0.0 or rxn.upper_bound < 0.0:
+                        return full_set, v_sol
+                    rxn.bounds = (0.0, 0.0)
+            model.objective = model.problem.Objective(Zero, direction="min")
+            rescue_coeffs = {}
+            for rid in extra_trace:
+                rxn = model.reactions.get_by_id(rid)
+                rescue_coeffs[rxn.forward_variable] = 1.0
+                rescue_coeffs[rxn.reverse_variable] = 1.0
+            if rescue_coeffs:
+                model.objective.set_linear_coefficients(rescue_coeffs)
+            model.solver.optimize()
+            if model.solver.status == OPTIMAL:
+                v_res = _read_flux_vector(model)
+                rescued = {
+                    rid for rid in extra_trace if abs(v_res[idx_of[rid]]) >= cutoff
+                }
+                return bin_set | rescued, v_res
+    except Exception:  # noqa: BLE001 - safe fallback on custom mock solvers in unit tests
+        return full_set, v_sol
+
+    return full_set, v_sol
 
 
 def _read_split_primals(

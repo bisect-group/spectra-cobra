@@ -691,6 +691,7 @@ def _preprocess(
 
     """
     from .consistency import consistent_reaction_ids
+    from .formulations import DEFAULT_SOLVER_TOLERANCE
 
     blocked: Optional[Set[str]] = None
     for label, factory in conditions:
@@ -704,7 +705,7 @@ def _preprocess(
             consistent, n_lps = consistent_reaction_ids(
                 constrained,
                 tol=tol,
-                detection_cutoff=constrained.tolerance,
+                detection_cutoff=min(constrained.tolerance, DEFAULT_SOLVER_TOLERANCE),
                 seed=seed,
             )
         here = original_ids - consistent
